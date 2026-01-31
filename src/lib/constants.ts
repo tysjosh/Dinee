@@ -148,7 +148,8 @@ export const PHONE_NUMBER_PATTERNS = [
 export const LANGUAGE_OPTIONS = [
   { value: 'english', label: 'English' },
   { value: 'spanish', label: 'Spanish' },
-  { value: 'french', label: 'French' }
+  { value: 'french', label: 'French' },
+  { value: 'pidgin', label: 'Nigerian Pidgin' }
 ];
 
 export const CALL_STATUS_CONFIG = {

@@ -29,6 +29,7 @@ type OrdersAction =
   | { type: "SET_ORDERS"; payload: Order[] }
   | { type: "ADD_ORDER"; payload: Order }
   | { type: "UPDATE_ORDER"; payload: Order }
+  | { type: "PATCH_ORDER"; payload: { orderId: string; updates: Partial<Order> } }
   | { type: "DELETE_ORDER"; payload: string }
   | { type: "CANCEL_ORDER"; payload: { orderId: string; reason: string } }
   | { type: "COMPLETE_ORDER"; payload: string }
@@ -89,6 +90,23 @@ function ordersReducer(state: OrdersState, action: OrdersAction): OrdersState {
     case "UPDATE_ORDER": {
       const updatedOrders = state.orders.map((order) =>
         order.id === action.payload.id ? action.payload : order
+      );
+      const { activeOrders, pastOrders } = categorizeOrders(updatedOrders);
+      return {
+        ...state,
+        orders: updatedOrders,
+        activeOrders,
+        pastOrders,
+        loading: false,
+        error: null,
+      };
+    }
+
+    case "PATCH_ORDER": {
+      const updatedOrders = state.orders.map((order) =>
+        order.id === action.payload.orderId
+          ? { ...order, ...action.payload.updates }
+          : order
       );
       const { activeOrders, pastOrders } = categorizeOrders(updatedOrders);
       return {
@@ -174,6 +192,9 @@ interface OrdersContextType {
     deleteOrder: (orderId: string) => void;
     cancelOrder: (orderId: string, reason: string) => void;
     completeOrder: (orderId: string) => void;
+    updatePaymentStatus: (orderId: string, status: Order["paymentStatus"]) => void;
+    updateDeliveryStatus: (orderId: string, status: Order["deliveryStatus"]) => void;
+    updateWhatsappStatus: (orderId: string, status: Order["whatsappStatus"]) => void;
     createOrder: (orderData: Omit<Order, "id" | "timestamp">) => void;
     reset: () => void;
   };
@@ -211,6 +232,9 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
   const updateOrderMutation = useMutation(api.orders.updateOrder);
   const cancelOrderMutation = useMutation(api.orders.cancelOrder);
   const completeOrderMutation = useMutation(api.orders.completeOrder);
+  const updateOrderPaymentStatusMutation = useMutation(api.orders.updateOrderPaymentStatus);
+  const updateOrderDeliveryStatusMutation = useMutation(api.orders.updateOrderDeliveryStatus);
+  const updateOrderWhatsappStatusMutation = useMutation(api.orders.updateOrderWhatsappStatus);
 
   // Helper function to convert Convex order to our Order type
   const convertOrder = (order: Doc<"orders">, calls: Call[]) => {
@@ -239,6 +263,23 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
         ),
       specialInstructions: order.specialInstructions,
       status: order.status,
+      paymentStatus: order.paymentStatus,
+      paymentProvider: order.paymentProvider,
+      paymentMethod: order.paymentMethod,
+      paymentReference: order.paymentReference,
+      paymentVerifiedAt: order.paymentVerifiedAt
+        ? new Date(order.paymentVerifiedAt)
+        : undefined,
+      whatsappStatus: order.whatsappStatus,
+      whatsappPhone: order.whatsappPhone,
+      whatsappLastMessageAt: order.whatsappLastMessageAt
+        ? new Date(order.whatsappLastMessageAt)
+        : undefined,
+      deliveryStatus: order.deliveryStatus,
+      deliveryPartner: order.deliveryPartner,
+      deliveryUpdatedAt: order.deliveryUpdatedAt
+        ? new Date(order.deliveryUpdatedAt)
+        : undefined,
       timestamp: new Date(order.orderPlacementTime || order._creationTime),
       cancellationReason: order.cancellationReason,
     };
@@ -342,6 +383,80 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
       } catch (error) {
         console.error("Failed to complete order:", error);
         dispatch({ type: "SET_ERROR", payload: "Failed to complete order" });
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    },
+
+    updatePaymentStatus: async (orderId: string, status: Order["paymentStatus"]) => {
+      try {
+        dispatch({ type: "SET_LOADING", payload: true });
+        const convexOrder = convexActiveOrders?.find(
+          (order) => order.orderId === orderId
+        );
+        if (convexOrder && status) {
+          await updateOrderPaymentStatusMutation({
+            orderId: convexOrder._id,
+            paymentStatus: status,
+            paymentProvider: status === "cod_pending" || status === "paid" ? "cash" : undefined,
+            paymentMethod: status === "cod_pending" || status === "paid" ? "cash" : undefined,
+          });
+        }
+        dispatch({
+          type: "PATCH_ORDER",
+          payload: { orderId, updates: { paymentStatus: status } },
+        });
+      } catch (error) {
+        console.error("Failed to update payment status:", error);
+        dispatch({ type: "SET_ERROR", payload: "Failed to update payment status" });
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    },
+
+    updateDeliveryStatus: async (orderId: string, status: Order["deliveryStatus"]) => {
+      try {
+        dispatch({ type: "SET_LOADING", payload: true });
+        const convexOrder = convexActiveOrders?.find(
+          (order) => order.orderId === orderId
+        );
+        if (convexOrder && status) {
+          await updateOrderDeliveryStatusMutation({
+            orderId: convexOrder._id,
+            deliveryStatus: status,
+          });
+        }
+        dispatch({
+          type: "PATCH_ORDER",
+          payload: { orderId, updates: { deliveryStatus: status } },
+        });
+      } catch (error) {
+        console.error("Failed to update delivery status:", error);
+        dispatch({ type: "SET_ERROR", payload: "Failed to update delivery status" });
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    },
+
+    updateWhatsappStatus: async (orderId: string, status: Order["whatsappStatus"]) => {
+      try {
+        dispatch({ type: "SET_LOADING", payload: true });
+        const convexOrder = convexActiveOrders?.find(
+          (order) => order.orderId === orderId
+        );
+        if (convexOrder && status) {
+          await updateOrderWhatsappStatusMutation({
+            orderId: convexOrder._id,
+            whatsappStatus: status,
+          });
+        }
+        dispatch({
+          type: "PATCH_ORDER",
+          payload: { orderId, updates: { whatsappStatus: status } },
+        });
+      } catch (error) {
+        console.error("Failed to update WhatsApp status:", error);
+        dispatch({ type: "SET_ERROR", payload: "Failed to update WhatsApp status" });
       } finally {
         dispatch({ type: "SET_LOADING", payload: false });
       }

@@ -125,3 +125,259 @@ export const cancelOrder = mutation({
     return args.orderId;
   },
 });
+
+export const updateOrderPaymentByReference = mutation({
+  args: {
+    paymentReference: v.string(),
+    paymentStatus: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("refunded"),
+      v.literal("cod_pending")
+    ),
+    paymentProvider: v.optional(
+      v.union(
+        v.literal("paystack"),
+        v.literal("flutterwave"),
+        v.literal("cash"),
+        v.literal("other")
+      )
+    ),
+    paymentMethod: v.optional(
+      v.union(
+        v.literal("card"),
+        v.literal("transfer"),
+        v.literal("cash"),
+        v.literal("ussd"),
+        v.literal("bank")
+      )
+    ),
+    paymentVerifiedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_payment_reference", (q) => q.eq("paymentReference", args.paymentReference))
+      .first();
+
+    if (!order) {
+      throw new Error("Order not found for payment reference");
+    }
+
+    await ctx.db.patch(order._id, {
+      paymentStatus: args.paymentStatus,
+      paymentProvider: args.paymentProvider ?? order.paymentProvider,
+      paymentMethod: args.paymentMethod ?? order.paymentMethod,
+      paymentVerifiedAt: args.paymentVerifiedAt ?? Date.now(),
+    });
+
+    return order._id;
+  },
+});
+
+export const updateOrderDeliveryStatus = mutation({
+  args: {
+    orderId: v.id("orders"),
+    deliveryStatus: v.union(
+      v.literal("pending"),
+      v.literal("preparing"),
+      v.literal("dispatched"),
+      v.literal("delivered"),
+      v.literal("failed"),
+      v.literal("cancelled")
+    ),
+    deliveryPartner: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.orderId, {
+      deliveryStatus: args.deliveryStatus,
+      deliveryPartner: args.deliveryPartner,
+      deliveryUpdatedAt: Date.now(),
+    });
+
+    return args.orderId;
+  },
+});
+
+export const updateOrderWhatsappStatus = mutation({
+  args: {
+    orderId: v.id("orders"),
+    whatsappStatus: v.union(
+      v.literal("opted_in"),
+      v.literal("opted_out"),
+      v.literal("pending")
+    ),
+    whatsappPhone: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.orderId, {
+      whatsappStatus: args.whatsappStatus,
+      whatsappPhone: args.whatsappPhone,
+      whatsappLastMessageAt: Date.now(),
+    });
+
+    return args.orderId;
+  },
+});
+
+export const updateOrderPaymentStatus = mutation({
+  args: {
+    orderId: v.id("orders"),
+    paymentStatus: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("refunded"),
+      v.literal("cod_pending")
+    ),
+    paymentProvider: v.optional(
+      v.union(
+        v.literal("paystack"),
+        v.literal("flutterwave"),
+        v.literal("cash"),
+        v.literal("other")
+      )
+    ),
+    paymentMethod: v.optional(
+      v.union(
+        v.literal("card"),
+        v.literal("transfer"),
+        v.literal("cash"),
+        v.literal("ussd"),
+        v.literal("bank")
+      )
+    ),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.orderId, {
+      paymentStatus: args.paymentStatus,
+      paymentProvider: args.paymentProvider,
+      paymentMethod: args.paymentMethod,
+      paymentVerifiedAt: Date.now(),
+    });
+
+    return args.orderId;
+  },
+});
+
+export const updateOrderPaymentByOrderId = mutation({
+  args: {
+    orderId: v.string(),
+    restaurantId: v.string(),
+    paymentStatus: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("refunded"),
+      v.literal("cod_pending")
+    ),
+    paymentProvider: v.optional(
+      v.union(
+        v.literal("paystack"),
+        v.literal("flutterwave"),
+        v.literal("cash"),
+        v.literal("other")
+      )
+    ),
+    paymentMethod: v.optional(
+      v.union(
+        v.literal("card"),
+        v.literal("transfer"),
+        v.literal("cash"),
+        v.literal("ussd"),
+        v.literal("bank")
+      )
+    ),
+  },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .first();
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    await ctx.db.patch(order._id, {
+      paymentStatus: args.paymentStatus,
+      paymentProvider: args.paymentProvider,
+      paymentMethod: args.paymentMethod,
+      paymentVerifiedAt: Date.now(),
+    });
+
+    return order._id;
+  },
+});
+
+export const updateOrderWhatsappByOrderId = mutation({
+  args: {
+    orderId: v.string(),
+    restaurantId: v.string(),
+    whatsappStatus: v.union(
+      v.literal("opted_in"),
+      v.literal("opted_out"),
+      v.literal("pending")
+    ),
+    whatsappPhone: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .first();
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    await ctx.db.patch(order._id, {
+      whatsappStatus: args.whatsappStatus,
+      whatsappPhone: args.whatsappPhone,
+      whatsappLastMessageAt: Date.now(),
+    });
+
+    return order._id;
+  },
+});
+
+export const updateOrderDeliveryByOrderId = mutation({
+  args: {
+    orderId: v.string(),
+    restaurantId: v.string(),
+    deliveryStatus: v.union(
+      v.literal("pending"),
+      v.literal("preparing"),
+      v.literal("dispatched"),
+      v.literal("delivered"),
+      v.literal("failed"),
+      v.literal("cancelled")
+    ),
+    deliveryPartner: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .first();
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    await ctx.db.patch(order._id, {
+      deliveryStatus: args.deliveryStatus,
+      deliveryPartner: args.deliveryPartner,
+      deliveryUpdatedAt: Date.now(),
+    });
+
+    return order._id;
+  },
+});

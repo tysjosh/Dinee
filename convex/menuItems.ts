@@ -9,6 +9,7 @@ export const createMenuItems = mutation({
       name: v.string(),
       price: v.string(),
       description: v.optional(v.string()),
+      modifiers: v.optional(v.array(v.string())),
     })),
   },
   handler: async (ctx, args) => {
@@ -32,6 +33,7 @@ export const createMenuItems = mutation({
         name: item.name,
         price: item.price,
         description: item.description,
+        modifiers: item.modifiers,
       });
       insertedItems.push(insertedItem);
     }
@@ -58,6 +60,7 @@ export const updateMenuItem = mutation({
     name: v.optional(v.string()),
     price: v.optional(v.string()),
     description: v.optional(v.string()),
+    modifiers: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;

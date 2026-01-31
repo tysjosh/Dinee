@@ -1,18 +1,19 @@
 import React, {
   ChangeEvent,
   Dispatch,
-  Ref,
-  RefObject,
   SetStateAction,
-  useEffect,
   useRef,
   useState,
 } from "react";
 import type { FormData } from "./RestaurantSetup";
 import { AppWindowMac, BadgePlus, ScanLine, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Button from "@/components/ui/Button";
-import Input from "@/components/ui/Input";
+import {
+  isValidPrice,
+  parseCsvMenu,
+  validateMenuItems,
+  type MenuImportError,
+} from "@/lib/menuValidation";
 
 // Type for handling the input change
 export type HandleInputChange = (
@@ -29,7 +30,10 @@ function NoMenuDetails({
   handleInputChange: HandleInputChange;
 }) {
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<MenuImportError[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,10 +55,44 @@ function NoMenuDetails({
         sucess: boolean;
         data: FormData["menuDetails"];
       };
+      const validationErrors = validateMenuItems(data.data);
+      if (validationErrors.length) {
+        setImportErrors(validationErrors);
+        throw new Error("Menu validation failed");
+      }
       handleInputChange("menuDetails", data.data);
+      setErrorMessage(null);
+      setImportErrors([]);
       setShowManualEntry(false);
     } catch (error) {
       console.error("Error in extracting menu data:", (error as Error).message);
+      setErrorMessage("Unable to extract menu data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCsvUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const text = await file.text();
+      const { items, errors } = parseCsvMenu(text);
+      if (!items.length) {
+        throw new Error("No menu items found in CSV.");
+      }
+      if (errors.length) {
+        setImportErrors(errors);
+        throw new Error("Menu validation failed.");
+      }
+      handleInputChange("menuDetails", items);
+      setErrorMessage(null);
+      setImportErrors([]);
+      setShowManualEntry(false);
+    } catch (error) {
+      console.error("Error parsing CSV menu:", (error as Error).message);
+      setErrorMessage("Unable to read CSV. Please check the format and try again.");
     } finally {
       setLoading(false);
     }
@@ -95,6 +133,29 @@ function NoMenuDetails({
         </p>
       </div>
 
+      {/* CSV Import */}
+      <div
+        className="group relative flex flex-col justify-center items-center h-full w-full card-minimal rounded-lg cursor-pointer hover:bg-white/5 transition-all duration-300 ease-in-out p-8 text-center"
+        onClick={() => !loading && csvInputRef.current?.click()}
+      >
+        <input
+          type="file"
+          ref={csvInputRef}
+          className="hidden"
+          accept=".csv,text/csv"
+          onChange={handleCsvUpload}
+          disabled={loading}
+        />
+        <div className="absolute top-3 right-3 bg-white/10 text-white/70 text-xs px-3 py-1 rounded-full border border-white/20">
+          CSV
+        </div>
+        <AppWindowMac className="text-white/60 h-10 w-10 mb-4" />
+        <h3 className="text-lg text-white text-minimal">Import CSV</h3>
+        <p className="text-sm text-white/70 mt-2 text-minimal">
+          Upload a CSV with name, price, description
+        </p>
+      </div>
+
       {/* Manual entry */}
       <div
         className="group flex flex-col justify-center items-center h-full w-full card-minimal rounded-lg cursor-pointer hover:bg-white/5 transition-all duration-300 ease-in-out p-8 text-center"
@@ -106,6 +167,36 @@ function NoMenuDetails({
           Enter items one-by-one
         </p>
       </div>
+
+      {errorMessage && (
+        <p className="text-sm text-red-400 md:col-span-2" role="alert">
+          {errorMessage}
+        </p>
+      )}
+      {importErrors.length > 0 && (
+        <div className="md:col-span-2 border border-red-500/40 bg-red-500/10 rounded-lg p-4 text-sm text-red-200 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-medium text-red-200">Menu import errors</p>
+            <button
+              type="button"
+              onClick={() => setImportErrors([])}
+              className="text-xs text-red-200 underline"
+            >
+              Clear report
+            </button>
+          </div>
+          <ul className="space-y-1 max-h-40 overflow-y-auto">
+            {importErrors.map((error, index) => (
+              <li key={`${error.row}-${index}`} className="text-xs text-red-100">
+                Row {error.row}: {error.issue}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-red-100">
+            Fix the issues and re-upload your CSV to retry the import.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -121,14 +212,29 @@ function ManualEntryForm({
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
+  const [modifiers, setModifiers] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim() || !price.trim()) {
+      setFormError("Name and price are required.");
+      return;
+    }
+    if (!isValidPrice(price)) {
+      setFormError("Price must be a number (e.g., 12 or 12.99).");
+      return;
+    }
     if (name && price) {
-      onAddItem({ name, price, description });
+      const parsedModifiers = modifiers
+        ? modifiers.split(/,|;/).map((value) => value.trim()).filter(Boolean)
+        : undefined;
+      onAddItem({ name, price, description, modifiers: parsedModifiers });
       setName("");
       setPrice("");
       setDescription("");
+      setModifiers("");
+      setFormError(null);
     }
   };
 
@@ -173,6 +279,29 @@ function ManualEntryForm({
             placeholder="e.g., 12.99"
             className="input-dark w-full px-4 py-3 rounded-lg"
             required
+          />
+        </div>
+        {formError && (
+          <p className="text-sm text-red-400" role="alert">
+            {formError}
+          </p>
+        )}
+        <div>
+          <label
+            htmlFor="itemModifiers"
+            className="block text-sm text-white/70 mb-2 text-minimal"
+          >
+            Modifiers (optional)
+          </label>
+          <input
+            id="itemModifiers"
+            type="text"
+            value={modifiers}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setModifiers(e.target.value)
+            }
+            placeholder="e.g., extra cheese; no onions"
+            className="input-dark w-full px-4 py-3 rounded-lg"
           />
         </div>
         <div>
@@ -229,6 +358,11 @@ function MenuItem({
           {item.description && (
             <p className="text-sm text-white/70 mt-1 text-minimal">
               {item.description}
+            </p>
+          )}
+          {item.modifiers && item.modifiers.length > 0 && (
+            <p className="text-xs text-white/50 mt-1 text-minimal">
+              Modifiers: {item.modifiers.join(", ")}
             </p>
           )}
         </div>

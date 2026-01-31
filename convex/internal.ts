@@ -5,6 +5,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
+import { assertBranchPlatform, assertRestaurantPlatform } from "./tenancy";
 
 
 export const getRestaurantAndMenuDetailsUsingId = query({
@@ -84,6 +85,8 @@ export const upsertCallData = mutation({
     data: v.object({
       callId: v.string(),
       restaurantId: v.optional(v.string()),
+      platformId: v.optional(v.string()),
+      branchId: v.optional(v.string()),
       phoneNumber: v.optional(v.string()),
       status: v.optional(v.union(v.literal("active"), v.literal("completed"))),
       orderId: v.optional(v.optional(v.string())),
@@ -96,6 +99,12 @@ export const upsertCallData = mutation({
       } = args.data
       console.log("📞 Upserting data")
       console.log(args.data)
+      if (args.data.platformId && args.data.restaurantId) {
+        await assertRestaurantPlatform(ctx, args.data.restaurantId, args.data.platformId);
+      }
+      if (args.data.platformId && args.data.branchId) {
+        await assertBranchPlatform(ctx, args.data.branchId, args.data.platformId);
+      }
       const callDataResponse = await ctx.db.query("calls")
         .withIndex("by_call_and_order_id", (q) => q.eq("callId", callId))
         .unique()
@@ -157,6 +166,8 @@ export const upsertOrders = mutation({
     data: v.object({
       orderId: v.string(),
       restaurantId: v.string(),
+      platformId: v.optional(v.string()),
+      branchId: v.optional(v.string()),
       callId: v.optional(v.string()), // callSid from Twilio
       customerName: v.string(),
       items: v.array(v.object({
@@ -171,6 +182,55 @@ export const upsertOrders = mutation({
         v.literal("completed"),
         v.literal("cancelled")
       ),
+      paymentStatus: v.optional(
+        v.union(
+          v.literal("pending"),
+          v.literal("paid"),
+          v.literal("failed"),
+          v.literal("refunded"),
+          v.literal("cod_pending")
+        )
+      ),
+      paymentProvider: v.optional(
+        v.union(
+          v.literal("paystack"),
+          v.literal("flutterwave"),
+          v.literal("cash"),
+          v.literal("other")
+        )
+      ),
+      paymentMethod: v.optional(
+        v.union(
+          v.literal("card"),
+          v.literal("transfer"),
+          v.literal("cash"),
+          v.literal("ussd"),
+          v.literal("bank")
+        )
+      ),
+      paymentReference: v.optional(v.string()),
+      paymentVerifiedAt: v.optional(v.number()),
+      whatsappStatus: v.optional(
+        v.union(
+          v.literal("opted_in"),
+          v.literal("opted_out"),
+          v.literal("pending")
+        )
+      ),
+      whatsappPhone: v.optional(v.string()),
+      whatsappLastMessageAt: v.optional(v.number()),
+      deliveryStatus: v.optional(
+        v.union(
+          v.literal("pending"),
+          v.literal("preparing"),
+          v.literal("dispatched"),
+          v.literal("delivered"),
+          v.literal("failed"),
+          v.literal("cancelled")
+        )
+      ),
+      deliveryPartner: v.optional(v.string()),
+      deliveryUpdatedAt: v.optional(v.number()),
       cancellationReason: v.optional(v.string()),
     })
   },
@@ -181,6 +241,12 @@ export const upsertOrders = mutation({
       } = args.data
       console.log("💬 Args.data")
       console.log(args.data)
+      if (args.data.platformId) {
+        await assertRestaurantPlatform(ctx, args.data.restaurantId, args.data.platformId);
+      }
+      if (args.data.platformId && args.data.branchId) {
+        await assertBranchPlatform(ctx, args.data.branchId, args.data.platformId);
+      }
       // checks for the existing order id
       const orderResponse = await ctx.db.query("orders")
         .withIndex("by_order_and_restaurant_id", (q) => q.eq("orderId", orderId))

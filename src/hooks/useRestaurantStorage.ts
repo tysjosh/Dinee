@@ -65,10 +65,11 @@ export function useRestaurantStorage() {
         // Update existing restaurant
         await updateRestaurant({
           restaurantId,
+          platformId: data.platformId,
           name: data.name,
           agentName: data.agentName,
           specialInstructions: data.specialInstructions,
-          languagePreference: data.languagePreference as 'english' | 'spanish' | 'french',
+          languagePreference: data.languagePreference as 'english' | 'spanish' | 'french' | 'pidgin',
         });
 
         // Save menu items separately
@@ -84,10 +85,11 @@ export function useRestaurantStorage() {
         return { restaurantId };
       } else {
         const result = await createRestaurant({
+          platformId: data.platformId,
           name: data.name,
           agentName: data.agentName,
           specialInstructions: data.specialInstructions,
-          languagePreference: data.languagePreference as 'english' | 'spanish' | 'french',
+          languagePreference: data.languagePreference as 'english' | 'spanish' | 'french' | 'pidgin',
         });
 
         if (result?.restaurantId) {
@@ -135,15 +137,17 @@ export function useRestaurantStorage() {
   // Convert Convex data to Restaurant type
   const convertedRestaurantData: Restaurant | null = restaurantData && menuItems ? {
     id: restaurantData.restaurantId,
+    platformId: restaurantData.platformId,
     name: restaurantData.name,
     agentName: restaurantData.agentName,
     menuDetails: menuItems.map(item => ({
       name: item.name,
       price: item.price,
       description: item.description,
+      modifiers: item.modifiers,
     })),
     specialInstructions: restaurantData.specialInstructions,
-    languagePreference: restaurantData.languagePreference as 'english' | 'spanish' | 'french',
+    languagePreference: restaurantData.languagePreference as 'english' | 'spanish' | 'french' | 'pidgin',
   } : null;
 
   return {

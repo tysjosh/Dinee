@@ -22,7 +22,10 @@
     "server:build:simple": "tsc src/app/ws-server/index.ts src/app/ws-server/tools.ts src/app/ws-server/server-constants.ts --outDir dist --target es2020 --module commonjs --moduleResolution node --esModuleInterop --allowSyntheticDefaultImports --skipLibCheck --noImplicitAny false --lib es2020,dom",
     "docker:build": "docker build -t kiro-ws-server .",
     "docker:run": "docker run -p 8000:8000 --env-file .env kiro-ws-server",
-    "docker:dev": "docker-compose up --build"
+    "docker:dev": "docker-compose up --build",
+    "test:menu-import": "node scripts/test-menu-import.js",
+    "test:tenant-guards": "node scripts/test-tenant-guards.js",
+    "test:whatsapp-messages": "node scripts/test-whatsapp-messages.js"
   },
   "keywords": [],
   "author": "",

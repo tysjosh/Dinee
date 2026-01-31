@@ -10,6 +10,7 @@ import {
   LOG_EVENT_TYPES,
   SHOW_TIMING_MATH,
   SYSTEM_PROMPT,
+  LOCALIZATION_PROMPT,
   VOICE,
 // } from "./server-constants";
 } from "./server-constants.ts";
@@ -19,6 +20,7 @@ import {
   wrapperAddTranscriptDialogues,
   wrapperUpsertOrders,
   generateOrderId,
+  wrapperGetTelephonyProviders,
   } from "./tools.ts";
 // } from "./tools";
 import twilio from "twilio";
@@ -38,6 +40,9 @@ let CALL_SID: string | null = "";
 
 // ONLY for the callback
 let CALLBACK_CONTEXT: { reason?: string; phoneNumber?: string; isCallback?: boolean; data?: string } = {};
+
+const FALLBACK_WORD_THRESHOLD = 2;
+const FALLBACK_MAX_ATTEMPTS = 2;
 
 const fastify = Fastify({ logger: true });
 fastify.register(fastifyFormBody);
@@ -102,6 +107,25 @@ fastify.all("/callback", async (request: any, reply) => {
       <Stream url="wss://${request.headers.host}/media-stream-callback" />
       </Connect>
     </Response>`;
+    let selectedProvider = { type: "twilio" };
+    try {
+      const providersResponse = await wrapperGetTelephonyProviders(currentPlatformId);
+      if (providersResponse?.success && Array.isArray(providersResponse.data)) {
+        const activeProviders = providersResponse.data
+          .filter((provider: any) => provider.isActive)
+          .sort((a: any, b: any) => a.priority - b.priority);
+        if (activeProviders.length > 0) {
+          selectedProvider = activeProviders[0];
+        }
+      }
+    } catch (error) {
+      console.log("Failed to load telephony providers, using default Twilio.");
+    }
+
+    if (selectedProvider.type !== "twilio") {
+      console.log("Unsupported provider type, falling back to Twilio.");
+    }
+
     const call = await client.calls.create({
       from: process.env.NEXT_VIRTUAL_NUMBER,
       to: phoneNumber,
@@ -130,6 +154,11 @@ fastify.register(async (fastify) => {
     let restaurantIdConfirmed = false;
     let currentRestaurantId: string | null = null;
     let currentAITranscript = "";
+    let currentLanguageCode = "en";
+    let currentFallbackChannel: "whatsapp" | "sms" | "none" | null = null;
+    let fallbackAttempts = 0;
+    let fallbackSent = false;
+    let currentPlatformId: string | null = null;
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -157,7 +186,7 @@ fastify.register(async (fastify) => {
             input_audio_transcription: {
               model: "gpt-4o-mini-transcribe",
               prompt: "Expect words related to restaurant orders, food items, phone numbers, and customer service.",
-              language: "en"
+              language: currentLanguageCode
             },
             // Remove output_audio_transcription to fix audio quality issues
             tools: [
@@ -244,6 +273,72 @@ fastify.register(async (fastify) => {
           },
         }),
       );
+    };
+
+    const buildLocalizedPrompt = (languagePreference?: string) => {
+      const languageLine = languagePreference
+        ? `Preferred language: ${languagePreference}.`
+        : "Preferred language: English.";
+      return `${SYSTEM_PROMPT}\n${LOCALIZATION_PROMPT}\n${languageLine}`;
+    };
+
+    const getLanguageCode = (languagePreference?: string) => {
+      switch (languagePreference) {
+        case "spanish":
+          return "es";
+        case "french":
+          return "fr";
+        case "pidgin":
+          return "en";
+        default:
+          return "en";
+      }
+    };
+
+    const updateSessionForRestaurant = (restaurantDetails?: { languagePreference?: string; fallbackChannel?: string }) => {
+      currentLanguageCode = getLanguageCode(restaurantDetails?.languagePreference);
+      currentFallbackChannel =
+        restaurantDetails?.fallbackChannel === "whatsapp" || restaurantDetails?.fallbackChannel === "sms"
+          ? restaurantDetails.fallbackChannel
+          : "none";
+
+      oaWs.send(
+        JSON.stringify({
+          type: "session.update",
+          session: {
+            instructions: buildLocalizedPrompt(restaurantDetails?.languagePreference),
+            input_audio_transcription: {
+              model: "gpt-4o-mini-transcribe",
+              prompt: "Expect words related to restaurant orders, food items, phone numbers, and customer service.",
+              language: currentLanguageCode,
+            },
+          },
+        })
+      );
+    };
+
+    const sendFallbackMessage = async (channel: "whatsapp" | "sms") => {
+      if (!FROM_NUMBER || fallbackSent) return;
+      const client = twilio(process.env.NEXT_TWILIO_SID, process.env.NEXT_TWILIO_AUTH_TOKEN);
+      const messageBody =
+        "We are having trouble hearing you. Please reply with your order details via this channel so we can continue.";
+
+      if (channel === "whatsapp") {
+        const whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+        if (!whatsappNumber) return;
+        await client.messages.create({
+          from: `whatsapp:${whatsappNumber}`,
+          to: `whatsapp:${FROM_NUMBER}`,
+          body: messageBody,
+        });
+      } else {
+        await client.messages.create({
+          from: process.env.NEXT_VIRTUAL_NUMBER,
+          to: FROM_NUMBER,
+          body: messageBody,
+        });
+      }
+      fallbackSent = true;
     };
 
     const greet = () => {
@@ -399,6 +494,22 @@ fastify.register(async (fastify) => {
         console.log("🎤 Human transcript completed:", res.transcript);
         // Save the completed human transcript
         await saveTranscriptIfConfirmed(res.transcript, 'human');
+        if (restaurantIdConfirmed) {
+          const wordCount = res.transcript?.trim().split(/\s+/).filter(Boolean).length || 0;
+          if (wordCount <= FALLBACK_WORD_THRESHOLD) {
+            fallbackAttempts += 1;
+          } else {
+            fallbackAttempts = 0;
+          }
+          if (
+            !fallbackSent &&
+            currentFallbackChannel &&
+            currentFallbackChannel !== "none" &&
+            fallbackAttempts >= FALLBACK_MAX_ATTEMPTS
+          ) {
+            await sendFallbackMessage(currentFallbackChannel);
+          }
+        }
       }
 
       // Function call from the model
@@ -416,6 +527,8 @@ fastify.register(async (fastify) => {
               if (output.success) {
                 restaurantIdConfirmed = true;
                 currentRestaurantId = args.restaurant_id;
+                currentPlatformId = output?.data?.restaurantDetails?.platformId ?? null;
+                updateSessionForRestaurant(output?.data?.restaurantDetails);
                 console.log("✅ Restaurant ID confirmed:", args.restaurant_id);
               }
               break;

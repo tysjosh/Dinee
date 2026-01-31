@@ -2,16 +2,12 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "motion/react";
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
-import Button from "@/components/ui/Button";
-import Input from "@/components/ui/Input";
-import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import CustomRadio from "@/components/ui/CustomRadio";
 import { Restaurant, LanguagePreference } from "@/types/global";
 import MenuDetails from "./menu-details";
-import { useRouter } from "next/navigation";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
+import { usePlatformStorage } from "@/hooks/usePlatformStorage";
+import { useUserStorage } from "@/hooks/useUserStorage";
 import { MinimalHeader } from "@/components/ui/Header";
 
 export interface RestaurantSetupProps {
@@ -19,21 +15,33 @@ export interface RestaurantSetupProps {
 }
 
 export interface FormData {
+  platformName: string;
+  platformId: string;
+  branchName: string;
+  branchAddress: string;
   name: string;
   agentName: string;
   menuDetails: Array<{
     name: string;
     price: string;
     description?: string;
+    modifiers?: string[];
   }>;
   specialInstructions: string;
   languagePreference: LanguagePreference;
+  ownerEmail: string;
+  userRole: "platform_admin" | "restaurant_owner" | "branch_manager" | "supervisor";
 }
 
 export interface FormErrors {
   [key: string]: string | undefined;
 }
 const STEPS = [
+  {
+    id: "platform-setup",
+    title: "Platform Information",
+    description: "Set up your platform and branch (optional)",
+  },
   {
     id: "restaurant-name",
     title: "Restaurant Information",
@@ -43,6 +51,11 @@ const STEPS = [
     id: "agent-name",
     title: "AI Agent Setup",
     description: "Configure your AI agent",
+  },
+  {
+    id: "team-access",
+    title: "Team Access",
+    description: "Set up the primary account and role",
   },
   {
     id: "menu-details",
@@ -81,6 +94,11 @@ const LANGUAGE_OPTIONS: {
     label: "French",
     description: "Français - Pour les clients francophones",
   },
+  {
+    value: "pidgin",
+    label: "Nigerian Pidgin",
+    description: "Pidgin English - For Nigerian customers",
+  },
 ];
 
 /**
@@ -88,16 +106,23 @@ const LANGUAGE_OPTIONS: {
  * configuring their restaurant information and AI agent settings
  */
 const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
-  const router = useRouter();
   const { saveRestaurantData } = useRestaurantStorage();
+  const { ensurePlatform, ensureBranch } = usePlatformStorage();
+  const { createPrimaryUser } = useUserStorage();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<FormData>({
+    platformName: "",
+    platformId: "",
+    branchName: "",
+    branchAddress: "",
     name: "",
     agentName: "",
     menuDetails: [],
     specialInstructions: "",
     languagePreference: "english",
+    ownerEmail: "",
+    userRole: "restaurant_owner",
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,6 +137,14 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
     const currentStepId = STEPS[currentStep].id;
 
     switch (currentStepId) {
+      case "platform-setup":
+        if (formData.branchName.trim() && !formData.platformName.trim() && !formData.platformId.trim()) {
+          newErrors.branchName = "Add a platform name or existing platform ID before creating a branch";
+        }
+        if (formData.platformId.trim() && formData.platformId.trim().length < 4) {
+          newErrors.platformId = "Platform ID should be at least 4 characters";
+        }
+        break;
       case "restaurant-name":
         if (!formData.name.trim()) {
           newErrors.name = "Restaurant name is required";
@@ -141,6 +174,27 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
         ) {
           newErrors.specialInstructions =
             "Special instructions should be at least 5 characters if provided";
+        }
+        break;
+
+      case "team-access":
+        if (!formData.ownerEmail.trim()) {
+          newErrors.ownerEmail = "Primary email is required";
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.ownerEmail)) {
+          newErrors.ownerEmail = "Enter a valid email address";
+        }
+        if (!formData.userRole) {
+          newErrors.userRole = "Select a role for this account";
+        }
+        if (
+          formData.userRole === "platform_admin" &&
+          !formData.platformName.trim() &&
+          !formData.platformId.trim()
+        ) {
+          newErrors.userRole = "Platform admins must be tied to a platform";
+        }
+        if (formData.userRole === "branch_manager" && !formData.branchName.trim()) {
+          newErrors.userRole = "Branch managers must be assigned to a branch";
         }
         break;
 
@@ -203,13 +257,39 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
 
     setIsSubmitting(true);
     try {
+      const platformId = await ensurePlatform({
+        platformName: formData.platformName.trim() || undefined,
+        existingPlatformId: formData.platformId.trim() || undefined,
+      });
+
       const result = await saveRestaurantData({
+        platformId: platformId || undefined,
         name: formData.name,
         agentName: formData.agentName,
         menuDetails: formData.menuDetails,
         specialInstructions: formData.specialInstructions,
         languagePreference: formData.languagePreference,
       });
+
+      let branchId: string | null = null;
+      if (platformId && formData.branchName.trim() && result?.restaurantId) {
+        branchId = await ensureBranch({
+          platformId,
+          restaurantId: result.restaurantId,
+          branchName: formData.branchName.trim(),
+          branchAddress: formData.branchAddress.trim() || undefined,
+        });
+      }
+
+      if (result?.restaurantId) {
+        await createPrimaryUser({
+          email: formData.ownerEmail.trim(),
+          role: formData.userRole,
+          platformId: platformId || undefined,
+          restaurantId: result.restaurantId,
+          branchId: branchId || undefined,
+        });
+      }
 
       onComplete(result?.restaurantId || "");
     } catch (error) {
@@ -228,6 +308,102 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
     const currentStepId = STEPS[currentStep].id;
 
     switch (currentStepId) {
+      case "platform-setup":
+        return (
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-3">
+                Platform Name
+                <span className="text-white/60 ml-1">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={formData.platformName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleInputChange("platformName", e.target.value)
+                }
+                placeholder="e.g., Dinee Platform Lagos"
+                className="input-dark w-full px-4 py-3 rounded-lg"
+                disabled={isSubmitting}
+              />
+              <p className="mt-2 text-sm text-white/60">
+                Create a new platform to manage multiple restaurants.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-3">
+                Existing Platform ID
+                <span className="text-white/60 ml-1">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={formData.platformId}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleInputChange("platformId", e.target.value)
+                }
+                placeholder="plat-xxxxxx"
+                className={`input-dark w-full px-4 py-3 rounded-lg ${
+                  errors.platformId
+                    ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
+                    : ""
+                }`}
+                disabled={isSubmitting}
+              />
+              {errors.platformId && (
+                <p className="mt-2 text-sm text-red-400" role="alert">
+                  {errors.platformId}
+                </p>
+              )}
+              <p className="mt-2 text-sm text-white/60">
+                Use this if you already have a platform set up.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-3">
+                Branch Name
+                <span className="text-white/60 ml-1">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={formData.branchName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleInputChange("branchName", e.target.value)
+                }
+                placeholder="e.g., Victoria Island Branch"
+                className={`input-dark w-full px-4 py-3 rounded-lg ${
+                  errors.branchName
+                    ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
+                    : ""
+                }`}
+                disabled={isSubmitting}
+              />
+              {errors.branchName && (
+                <p className="mt-2 text-sm text-red-400" role="alert">
+                  {errors.branchName}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-white/70 mb-3">
+                Branch Address
+                <span className="text-white/60 ml-1">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={formData.branchAddress}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleInputChange("branchAddress", e.target.value)
+                }
+                placeholder="e.g., 12 Adeola Odeku St, Lagos"
+                className="input-dark w-full px-4 py-3 rounded-lg"
+                disabled={isSubmitting}
+              />
+            </div>
+          </div>
+        );
       case "restaurant-name":
         return (
           <div>
@@ -383,6 +559,81 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
                 daily specials&quot;, &quot;Check for allergies&quot;
               </p>
             )}
+          </div>
+        );
+
+      case "team-access":
+        return (
+          <div className="space-y-6">
+            <div>
+              <label
+                htmlFor="owner-email"
+                className="block text-sm font-medium text-white/70 mb-3"
+              >
+                Primary Account Email
+                <span className="text-red-400 ml-1" aria-label="required">
+                  *
+                </span>
+              </label>
+              <input
+                id="owner-email"
+                type="email"
+                value={formData.ownerEmail}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleInputChange("ownerEmail", e.target.value)
+                }
+                placeholder="owner@restaurant.com"
+                className={`input-dark w-full px-4 py-3 rounded-lg ${
+                  errors.ownerEmail
+                    ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
+                    : ""
+                }`}
+                disabled={isSubmitting}
+              />
+              {errors.ownerEmail && (
+                <p className="mt-2 text-sm text-red-400" role="alert">
+                  {errors.ownerEmail}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="user-role"
+                className="block text-sm font-medium text-white/70 mb-3"
+              >
+                Role
+                <span className="text-red-400 ml-1" aria-label="required">
+                  *
+                </span>
+              </label>
+              <select
+                id="user-role"
+                value={formData.userRole}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  handleInputChange("userRole", e.target.value)
+                }
+                className={`input-dark w-full px-4 py-3 rounded-lg ${
+                  errors.userRole
+                    ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
+                    : ""
+                }`}
+                disabled={isSubmitting}
+              >
+                <option value="platform_admin">Platform Admin</option>
+                <option value="restaurant_owner">Restaurant Owner</option>
+                <option value="branch_manager">Branch Manager</option>
+                <option value="supervisor">Supervisor</option>
+              </select>
+              {errors.userRole && (
+                <p className="mt-2 text-sm text-red-400" role="alert">
+                  {errors.userRole}
+                </p>
+              )}
+              <p className="mt-2 text-sm text-white/60">
+                This controls what dashboards and settings this account can access.
+              </p>
+            </div>
           </div>
         );
 

@@ -12,12 +12,18 @@ function generateRestaurantId(): string {
 export const createRestaurant = mutation({
   args: {
     name: v.string(),
+    platformId: v.optional(v.string()),
     agentName: v.string(),
     specialInstructions: v.string(),
     languagePreference: v.union(
       v.literal("english"),
       v.literal("spanish"),
-      v.literal("french")
+      v.literal("french"),
+      v.literal("pidgin")
+    ),
+    locale: v.optional(v.string()),
+    fallbackChannel: v.optional(
+      v.union(v.literal("whatsapp"), v.literal("sms"), v.literal("none"))
     ),
     menuDetails: v.optional(v.array(v.object({
       name: v.string(),
@@ -27,6 +33,17 @@ export const createRestaurant = mutation({
     virtualNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.platformId) {
+      const platform = await ctx.db
+        .query("platforms")
+        .withIndex("by_platform_id", (q) => q.eq("platformId", args.platformId))
+        .first();
+
+      if (!platform) {
+        throw new Error("Platform not found");
+      }
+    }
+
     // Generate unique restaurant ID
     let restaurantId: string;
     let existingRestaurant;
@@ -41,10 +58,13 @@ export const createRestaurant = mutation({
 
     const docId = await ctx.db.insert("restaurants", {
       restaurantId,
+      platformId: args.platformId,
       name: args.name,
       agentName: args.agentName,
       specialInstructions: args.specialInstructions,
       languagePreference: args.languagePreference,
+      locale: args.locale,
+      fallbackChannel: args.fallbackChannel,
       createdAt: Date.now(),
     });
 
@@ -64,17 +84,33 @@ export const getRestaurant = query({
   },
 });
 
+export const listRestaurantsByPlatform = query({
+  args: { platformId: v.string() },
+  handler: async (ctx, args) => {
+    return ctx.db
+      .query("restaurants")
+      .withIndex("by_platform_id", (q) => q.eq("platformId", args.platformId))
+      .collect();
+  },
+});
+
 export const updateRestaurant = mutation({
   args: {
     restaurantId: v.string(),
+    platformId: v.optional(v.string()),
     name: v.optional(v.string()),
     agentName: v.optional(v.string()),
     specialInstructions: v.optional(v.string()),
     languagePreference: v.optional(v.union(
       v.literal("english"),
       v.literal("spanish"),
-      v.literal("french")
+      v.literal("french"),
+      v.literal("pidgin")
     )),
+    locale: v.optional(v.string()),
+    fallbackChannel: v.optional(
+      v.union(v.literal("whatsapp"), v.literal("sms"), v.literal("none"))
+    ),
     menuDetails: v.optional(v.array(v.object({
       name: v.string(),
       price: v.string(),
@@ -92,12 +128,26 @@ export const updateRestaurant = mutation({
       throw new Error("Restaurant not found");
     }
 
+    if (args.platformId) {
+      const platform = await ctx.db
+        .query("platforms")
+        .withIndex("by_platform_id", (q) => q.eq("platformId", args.platformId))
+        .first();
+
+      if (!platform) {
+        throw new Error("Platform not found");
+      }
+    }
+
     // Only update fields that are provided
     const updates: any = {};
+    if (args.platformId !== undefined) updates.platformId = args.platformId;
     if (args.name !== undefined) updates.name = args.name;
     if (args.agentName !== undefined) updates.agentName = args.agentName;
     if (args.specialInstructions !== undefined) updates.specialInstructions = args.specialInstructions;
     if (args.languagePreference !== undefined) updates.languagePreference = args.languagePreference;
+    if (args.locale !== undefined) updates.locale = args.locale;
+    if (args.fallbackChannel !== undefined) updates.fallbackChannel = args.fallbackChannel;
     if (args.menuDetails !== undefined) updates.menuDetails = args.menuDetails;
     if (args.virtualNumber !== undefined) updates.virtualNumber = args.virtualNumber;
 
@@ -131,6 +181,15 @@ export const deleteRestaurantData = mutation({
         await ctx.db.delete(item._id);
       }
 
+      const branches = await ctx.db
+        .query("branches")
+        .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
+        .collect();
+
+      for (const branch of branches) {
+        await ctx.db.delete(branch._id);
+      }
+
       return true;
     } catch (error) {
       console.log("Error in `deleteRestaurantData`", (error as Error).message);
@@ -154,6 +213,16 @@ export const deleteAllData = mutation({
         await ctx.db.delete(item._id);
       }
 
+      const allBranches = await ctx.db.query("branches").collect();
+      for (const branch of allBranches) {
+        await ctx.db.delete(branch._id);
+      }
+
+      const allPlatforms = await ctx.db.query("platforms").collect();
+      for (const platform of allPlatforms) {
+        await ctx.db.delete(platform._id);
+      }
+
       return true;
     } catch (error) {
       console.log("Error in `deleteAllData`", (error as Error).message);
@@ -161,5 +230,3 @@ export const deleteAllData = mutation({
     }
   },
 });
-
-

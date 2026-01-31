@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import CallbackModal from "./CallbackModal";
 import OrderCancellationModal from "./OrderCancellationModal";
 import { useOrders } from "@/contexts";
+import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 import {
   Clock,
   Phone,
@@ -30,10 +31,12 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
     state: { activeOrders: currentOrders, loading, error },
     actions,
   } = useOrders();
+  const { restaurantId } = useRestaurantStorage();
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
   const [cancellationModalOpen, setCancellationModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [whatsappSending, setWhatsappSending] = useState<string | null>(null);
 
   const toggleOrderExpansion = (orderId: string) => {
     const newExpanded = new Set(expandedOrders);
@@ -113,6 +116,39 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
       actions.setError("Failed to cancel order");
     } finally {
       actions.setLoading(false);
+    }
+  };
+
+  const handleWhatsappSend = async (order: Order, messageType: "confirmation" | "status_update") => {
+    if (!restaurantId) {
+      actions.setError("Missing restaurant ID for WhatsApp updates");
+      return;
+    }
+    if (!order.phoneNumber || order.phoneNumber === "Unknown") {
+      actions.setError("Missing customer phone number");
+      return;
+    }
+    try {
+      setWhatsappSending(order.id);
+      const response = await fetch("/client/api/v1/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          restaurantId,
+          phoneNumber: order.phoneNumber,
+          messageType,
+          deliveryStatus: order.deliveryStatus,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to send WhatsApp update");
+      }
+      actions.updateWhatsappStatus(order.id, "opted_in");
+    } catch (error) {
+      actions.setError("Failed to send WhatsApp update");
+    } finally {
+      setWhatsappSending(null);
     }
   };
 
@@ -356,6 +392,91 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       </div>
                     </div>
                   )}
+
+                  {/* Status Controls */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                      <label className="block text-xs text-white/60 mb-2">
+                        Payment Status
+                      </label>
+                      <select
+                        value={order.paymentStatus ?? "pending"}
+                        onChange={(e) =>
+                          actions.updatePaymentStatus(
+                            order.id,
+                            e.target.value as Order["paymentStatus"]
+                          )
+                        }
+                        className="input-dark w-full px-3 py-2 rounded-lg text-sm"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="paid">Paid</option>
+                        <option value="failed">Failed</option>
+                        <option value="cod_pending">Cash on Delivery</option>
+                      </select>
+                      <button
+                        className="mt-2 w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg text-xs"
+                        onClick={() => actions.updatePaymentStatus(order.id, "paid")}
+                      >
+                        Mark COD Collected
+                      </button>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                      <label className="block text-xs text-white/60 mb-2">
+                        Delivery Status
+                      </label>
+                      <select
+                        value={order.deliveryStatus ?? "pending"}
+                        onChange={(e) =>
+                          actions.updateDeliveryStatus(
+                            order.id,
+                            e.target.value as Order["deliveryStatus"]
+                          )
+                        }
+                        className="input-dark w-full px-3 py-2 rounded-lg text-sm"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="preparing">Preparing</option>
+                        <option value="dispatched">Dispatched</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="failed">Failed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                      <button
+                        className="mt-2 w-full bg-blue-500/10 border border-blue-500/20 text-blue-300 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg text-xs"
+                        onClick={() => handleWhatsappSend(order, "status_update")}
+                        disabled={whatsappSending === order.id}
+                      >
+                        {whatsappSending === order.id ? "Sending..." : "Send WhatsApp Update"}
+                      </button>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                      <label className="block text-xs text-white/60 mb-2">
+                        WhatsApp Opt-In
+                      </label>
+                      <select
+                        value={order.whatsappStatus ?? "pending"}
+                        onChange={(e) =>
+                          actions.updateWhatsappStatus(
+                            order.id,
+                            e.target.value as Order["whatsappStatus"]
+                          )
+                        }
+                        className="input-dark w-full px-3 py-2 rounded-lg text-sm"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="opted_in">Opted In</option>
+                        <option value="opted_out">Opted Out</option>
+                      </select>
+                      <button
+                        className="mt-2 w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg text-xs"
+                        onClick={() => handleWhatsappSend(order, "confirmation")}
+                        disabled={whatsappSending === order.id}
+                      >
+                        {whatsappSending === order.id ? "Sending..." : "Send Confirmation"}
+                      </button>
+                    </div>
+                  </div>
 
                   {/* Action Buttons */}
                   <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-white/10">

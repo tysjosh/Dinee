@@ -11,6 +11,13 @@ export async function wrapperGetRestaurantDetails(restaurantId: string = "67126"
   return data;
 }
 
+export async function wrapperGetTelephonyProviders(platformId?: string | null) {
+  const params = platformId ? `?platformId=${platformId}` : "";
+  const response = await fetch(`${NEXT_APP_URL}/api/v1/telephony/providers${params}`);
+  const data = await response.json();
+  return data;
+}
+
 /**
  * Inserts or updates call data in the database
  */
