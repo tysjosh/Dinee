@@ -168,6 +168,8 @@ export const upsertOrders = mutation({
       totalAmount: v.optional(v.number()),
       status: v.union(
         v.literal("active"),
+        v.literal("preparing"),
+        v.literal("ready"),
         v.literal("completed"),
         v.literal("cancelled")
       ),

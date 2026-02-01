@@ -145,10 +145,18 @@ export const PHONE_NUMBER_PATTERNS = [
   '555.###.####'
 ];
 
+/**
+ * Language options for restaurant configuration
+ * 
+ * @requirements 16.2 - Include "nigerian_english" as a language preference option
+ * @requirements 17.2 - Include "pidgin" as a language preference option
+ */
 export const LANGUAGE_OPTIONS = [
-  { value: 'english', label: 'English' },
-  { value: 'spanish', label: 'Spanish' },
-  { value: 'french', label: 'French' }
+  { value: 'english', label: 'English', description: 'Standard English' },
+  { value: 'nigerian_english', label: 'Nigerian English', description: 'English with Nigerian accent patterns and local expressions' },
+  { value: 'pidgin', label: 'Nigerian Pidgin', description: 'Nigerian Pidgin English (Naija)' },
+  { value: 'spanish', label: 'Spanish', description: 'Español' },
+  { value: 'french', label: 'French', description: 'Français' }
 ];
 
 export const CALL_STATUS_CONFIG = {

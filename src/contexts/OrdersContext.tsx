@@ -213,13 +213,13 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
   const completeOrderMutation = useMutation(api.orders.completeOrder);
 
   // Helper function to convert Convex order to our Order type
-  const convertOrder = (order: Doc<"orders">, calls: Call[]) => {
+  const convertOrder = (order: Doc<"orders">, calls: Call[]): Order => {
     const associatedCall = calls.find((call) => call.callId === order.callId);
 
     return {
       id: order.orderId,
       callId: order.callId,
-      phoneNumber: associatedCall?.phoneNumber || "Unknown",
+      phoneNumber: associatedCall?.phoneNumber || order.customerPhone || "Unknown",
       customerName: order.customerName,
       items: order.items.map(
         (item: Doc<"orders">["items"][0], index: number) => ({
@@ -241,6 +241,24 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
       status: order.status,
       timestamp: new Date(order.orderPlacementTime || order._creationTime),
       cancellationReason: order.cancellationReason,
+      // Multi-tenant fields
+      branchId: order.branchId,
+      restaurantId: order.restaurantId,
+      // Payment fields (Nigerian market)
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      paymentReference: order.paymentReference,
+      paymentTimestamp: order.paymentTimestamp,
+      // Delivery fields
+      deliveryStatus: order.deliveryStatus,
+      riderId: order.riderId,
+      riderName: order.riderName,
+      dispatchedAt: order.dispatchedAt,
+      deliveredAt: order.deliveredAt,
+      deliveryFailureReason: order.deliveryFailureReason,
+      // WhatsApp fields
+      whatsappOptIn: order.whatsappOptIn,
+      whatsappMessageIds: order.whatsappMessageIds,
     };
   };
 

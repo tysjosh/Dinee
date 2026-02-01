@@ -1,19 +1,24 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import CurrentOrders from "./CurrentOrders";
 import PastOrders from "./PastOrders";
-import { ShoppingBag, History, Clock } from "lucide-react";
+import DeliveryStatusUI from "./DeliveryStatusUI";
+import { ShoppingBag, History, Clock, Truck } from "lucide-react";
 import { useOrders } from "@/contexts";
+import type { BranchDeliveryMetrics } from "@/lib/delivery/types";
 
 export interface OrdersSectionProps {
   tabId: "orders";
 }
 
-type OrdersTabType = "current" | "past";
+type OrdersTabType = "current" | "past" | "delivery";
 
 /**
- * Orders section component that manages current and past orders
- * Shows order counts and provides navigation between active and historical orders
+ * Orders section component that manages current, past, and delivery orders
+ * Shows order counts and provides navigation between active, historical, and delivery views
+ * 
+ * @requirements 14.6 - Display orders grouped by delivery status in branch dashboard
+ * @requirements 14.7 - Show average delivery time metrics
  */
 const OrdersSection: React.FC<OrdersSectionProps> = ({ tabId }) => {
   const [activeOrdersTab, setActiveOrdersTab] =
@@ -22,6 +27,61 @@ const OrdersSection: React.FC<OrdersSectionProps> = ({ tabId }) => {
   const {
     state: { activeOrders, pastOrders },
   } = useOrders();
+
+  // Get all orders with delivery status for the delivery tab
+  // Combine active and past orders that have delivery tracking
+  const deliveryOrders = useMemo(() => {
+    const allOrders = [...activeOrders, ...pastOrders];
+    // Filter orders that have delivery status set (i.e., orders being tracked for delivery)
+    return allOrders.filter(order => order.deliveryStatus !== undefined);
+  }, [activeOrders, pastOrders]);
+
+  // Calculate delivery metrics for the branch
+  // @requirements 14.7 - Calculate and display average delivery time per branch
+  const deliveryMetrics = useMemo((): BranchDeliveryMetrics | undefined => {
+    const deliveredOrders = deliveryOrders.filter(
+      order => order.deliveryStatus === 'delivered' && order.dispatchedAt && order.deliveredAt
+    );
+    const failedOrders = deliveryOrders.filter(order => order.deliveryStatus === 'failed');
+
+    if (deliveredOrders.length === 0 && failedOrders.length === 0) {
+      return undefined;
+    }
+
+    // Calculate delivery times in minutes
+    const deliveryTimes = deliveredOrders.map(order => {
+      const dispatchedAt = order.dispatchedAt || 0;
+      const deliveredAt = order.deliveredAt || 0;
+      return Math.round((deliveredAt - dispatchedAt) / (1000 * 60));
+    }).filter(time => time > 0);
+
+    const averageDeliveryTime = deliveryTimes.length > 0
+      ? Math.round(deliveryTimes.reduce((sum, time) => sum + time, 0) / deliveryTimes.length)
+      : 0;
+
+    const totalDeliveries = deliveredOrders.length + failedOrders.length;
+    const successRate = totalDeliveries > 0
+      ? Math.round((deliveredOrders.length / totalDeliveries) * 100)
+      : 0;
+
+    return {
+      branchId: deliveryOrders[0]?.branchId || '',
+      averageDeliveryTime,
+      totalDeliveries,
+      failedDeliveries: failedOrders.length,
+      successRate,
+      fastestDelivery: deliveryTimes.length > 0 ? Math.min(...deliveryTimes) : undefined,
+      slowestDelivery: deliveryTimes.length > 0 ? Math.max(...deliveryTimes) : undefined,
+    };
+  }, [deliveryOrders]);
+
+  // Count active deliveries (not delivered or failed)
+  const activeDeliveryCount = useMemo(() => {
+    return deliveryOrders.filter(order => 
+      order.deliveryStatus && 
+      !['delivered', 'failed'].includes(order.deliveryStatus)
+    ).length;
+  }, [deliveryOrders]);
 
   const ordersTabs = [
     {
@@ -35,6 +95,12 @@ const OrdersSection: React.FC<OrdersSectionProps> = ({ tabId }) => {
       label: "Order History",
       icon: History,
       count: pastOrders.length,
+    },
+    {
+      id: "delivery" as OrdersTabType,
+      label: "Delivery",
+      icon: Truck,
+      count: activeDeliveryCount,
     },
   ];
 
@@ -95,6 +161,13 @@ const OrdersSection: React.FC<OrdersSectionProps> = ({ tabId }) => {
       <div>
         {activeOrdersTab === "current" && <CurrentOrders />}
         {activeOrdersTab === "past" && <PastOrders />}
+        {activeOrdersTab === "delivery" && (
+          <DeliveryStatusUI
+            orders={deliveryOrders}
+            metrics={deliveryMetrics}
+            showMetrics={true}
+          />
+        )}
       </div>
     </div>
   );

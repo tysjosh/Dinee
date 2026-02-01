@@ -18,6 +18,8 @@ import {
   wrapperAddTranscriptDialogues,
   wrapperUpsertOrders,
   generateOrderId,
+  wrapperCheckBlocked,
+  generateBlockedCallTwiML,
 } from "./tools.ts";
 import twilio from "twilio";
 
@@ -59,6 +61,39 @@ fastify.all("/health", async (_req, reply) => {
 fastify.all("/incoming-call", async (request: any, reply) => {
   const callSid = request.body.CallSid || request.query?.CallSid;
   const fromNumber = request.body.From || request.query?.From;
+  
+  // Check if the phone number is blocked or requires verification
+  // Requirements: 25.4 - Reject or require verification for blocklisted numbers
+  if (fromNumber) {
+    try {
+      const blockingResult = await wrapperCheckBlocked(fromNumber);
+      
+      if (blockingResult.success && blockingResult.data) {
+        const { action, reason } = blockingResult.data;
+        
+        if (action === 'block') {
+          // Immediately reject calls from blocked numbers
+          console.log(`🚫 Blocking call from ${fromNumber}: ${reason}`);
+          const twiml = generateBlockedCallTwiML();
+          return reply.type("text/xml").send(twiml);
+        }
+        
+        if (action === 'require_verification') {
+          // Log the verification requirement - the call will proceed but with a flag
+          // In a production system, this could transfer to a human agent
+          console.log(`⚠️ Call from ${fromNumber} requires verification: ${reason}`);
+          // For now, we allow the call to proceed but log the warning
+          // A more sophisticated implementation could:
+          // 1. Transfer to a human agent
+          // 2. Add extra verification steps in the AI conversation
+          // 3. Flag the order for manual review
+        }
+      }
+    } catch (error) {
+      // If blocking check fails, allow the call to proceed (fail-open)
+      console.error("Error checking blocked status:", error);
+    }
+  }
   
   // Pass call context via query params to the WebSocket connection
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>

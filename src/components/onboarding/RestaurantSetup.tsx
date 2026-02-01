@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import CustomRadio from "@/components/ui/CustomRadio";
 import { LanguagePreference } from "@/types/global";
 import MenuDetails from "./menu-details";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 import { MinimalHeader } from "@/components/ui/Header";
+import BranchSetup, { BranchData } from "./BranchSetup";
 
 export interface RestaurantSetupProps {
   onComplete: (restaurantId: string) => void;
@@ -22,16 +23,23 @@ export interface FormData {
   }>;
   specialInstructions: string;
   languagePreference: LanguagePreference;
+  branches: BranchData[];
 }
 
 export interface FormErrors {
   [key: string]: string | undefined;
 }
+
 const STEPS = [
   {
     id: "restaurant-name",
     title: "Restaurant Information",
     description: "Tell us about your restaurant",
+  },
+  {
+    id: "branches",
+    title: "Branch Locations",
+    description: "Add your restaurant branch locations",
   },
   {
     id: "agent-name",
@@ -66,6 +74,16 @@ const LANGUAGE_OPTIONS: {
     description: "Default language for customer interactions",
   },
   {
+    value: "nigerian_english",
+    label: "Nigerian English",
+    description: "English with Nigerian accent patterns and local expressions",
+  },
+  {
+    value: "pidgin",
+    label: "Nigerian Pidgin",
+    description: "Nigerian Pidgin English (Naija) for local customers",
+  },
+  {
     value: "spanish",
     label: "Spanish",
     description: "Español - Para clientes hispanohablantes",
@@ -80,6 +98,8 @@ const LANGUAGE_OPTIONS: {
 /**
  * Multi-step restaurant setup component that guides users through
  * configuring their restaurant information and AI agent settings
+ * 
+ * Requirements: 3.2 - Allows adding multiple branches during initial setup
  */
 const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
   const { saveRestaurantData } = useRestaurantStorage();
@@ -91,10 +111,15 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
     menuDetails: [],
     specialInstructions: "",
     languagePreference: "english",
+    branches: [],
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  
+  // Branch management state
+  const [isAddingBranch, setIsAddingBranch] = useState(false);
+  const [editingBranchIndex, setEditingBranchIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setPageLoading(false);
@@ -110,6 +135,13 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
           newErrors.name = "Restaurant name is required";
         } else if (formData.name.trim().length < 2) {
           newErrors.name = "Restaurant name must be at least 2 characters";
+        }
+        break;
+
+      case "branches":
+        // At least one branch is required
+        if (formData.branches.length === 0) {
+          newErrors.branches = "Please add at least one branch location";
         }
         break;
 
@@ -175,6 +207,61 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
     }
   };
 
+  /**
+   * Add a new branch to the list
+   */
+  const handleAddBranch = (branchData: BranchData) => {
+    setFormData((prev) => ({
+      ...prev,
+      branches: [...prev.branches, branchData],
+    }));
+    setIsAddingBranch(false);
+    // Clear branch error when a branch is added
+    if (errors.branches) {
+      setErrors((prev) => ({ ...prev, branches: undefined }));
+    }
+  };
+
+  /**
+   * Update an existing branch
+   */
+  const handleUpdateBranch = (branchData: BranchData) => {
+    if (editingBranchIndex !== null) {
+      setFormData((prev) => ({
+        ...prev,
+        branches: prev.branches.map((branch, index) =>
+          index === editingBranchIndex ? branchData : branch
+        ),
+      }));
+      setEditingBranchIndex(null);
+    }
+  };
+
+  /**
+   * Remove a branch from the list
+   */
+  const handleRemoveBranch = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      branches: prev.branches.filter((_, i) => i !== index),
+    }));
+  };
+
+  /**
+   * Start editing a branch
+   */
+  const handleEditBranch = (index: number) => {
+    setEditingBranchIndex(index);
+  };
+
+  /**
+   * Cancel branch add/edit mode
+   */
+  const handleCancelBranchEdit = () => {
+    setIsAddingBranch(false);
+    setEditingBranchIndex(null);
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Enter" && !isSubmitting) {
@@ -202,6 +289,7 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
         menuDetails: formData.menuDetails,
         specialInstructions: formData.specialInstructions,
         languagePreference: formData.languagePreference,
+        branches: formData.branches,
       });
 
       onComplete(result?.restaurantId || "");
@@ -249,6 +337,171 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
             {errors.name && (
               <p className="mt-2 text-sm text-red-400" role="alert">
                 {errors.name}
+              </p>
+            )}
+          </div>
+        );
+
+      case "branches":
+        // Show BranchSetup form when adding or editing
+        if (isAddingBranch) {
+          return (
+            <BranchSetup
+              onComplete={handleAddBranch}
+              onBack={handleCancelBranchEdit}
+              isSubmitting={isSubmitting}
+              title="Add New Branch"
+              description="Enter the details for this branch location"
+              submitButtonText="Add Branch"
+            />
+          );
+        }
+
+        if (editingBranchIndex !== null) {
+          return (
+            <BranchSetup
+              initialData={formData.branches[editingBranchIndex]}
+              onComplete={handleUpdateBranch}
+              onBack={handleCancelBranchEdit}
+              isSubmitting={isSubmitting}
+              title="Edit Branch"
+              description="Update the details for this branch location"
+              submitButtonText="Save Changes"
+            />
+          );
+        }
+
+        // Show branch list and add button
+        return (
+          <div className="space-y-6">
+            {/* Branch List */}
+            {formData.branches.length > 0 && (
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-white/70">
+                  Added Branches ({formData.branches.length})
+                </label>
+                <AnimatePresence mode="popLayout">
+                  {formData.branches.map((branch, index) => (
+                    <motion.div
+                      key={`branch-${index}-${branch.name}`}
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ duration: 0.2 }}
+                      className="bg-white/5 border border-white/10 rounded-lg p-4 hover:border-emerald-500/30 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-white font-medium truncate">
+                            {branch.name}
+                          </h4>
+                          <p className="text-white/60 text-sm mt-1 truncate">
+                            {branch.address}
+                          </p>
+                          <p className="text-white/50 text-sm mt-1">
+                            {branch.phoneNumber}
+                          </p>
+                          {/* Operating hours summary */}
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {Object.entries(branch.operatingHours).map(([day, hours]) => (
+                              hours && (
+                                <span
+                                  key={day}
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                >
+                                  {day.slice(0, 3).toUpperCase()}
+                                </span>
+                              )
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleEditBranch(index)}
+                            disabled={isSubmitting}
+                            className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                            aria-label={`Edit ${branch.name}`}
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBranch(index)}
+                            disabled={isSubmitting}
+                            className="p-2 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            aria-label={`Remove ${branch.name}`}
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {/* Add Branch Button */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setIsAddingBranch(true)}
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-white/20 rounded-lg text-white/70 hover:text-white hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                  />
+                </svg>
+                <span>Add {formData.branches.length > 0 ? "Another" : "a"} Branch</span>
+              </button>
+            </div>
+
+            {/* Error message */}
+            {errors.branches && (
+              <p className="text-sm text-red-400" role="alert">
+                {errors.branches}
+              </p>
+            )}
+
+            {/* Helper text */}
+            {!errors.branches && (
+              <p className="text-sm text-white/60">
+                Add at least one branch location. You can add more branches later from your dashboard.
               </p>
             )}
           </div>
@@ -516,41 +769,43 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
 
             <div className="space-y-6">{renderStepContent()}</div>
 
-            {/* Navigation */}
-            <div className="flex justify-between pt-8 mt-8 border-t border-white/10">
-              <button
-                className="btn-minimal btn-secondary-minimal px-6 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={handlePrevious}
-                disabled={currentStep === 0 || isSubmitting}
-              >
-                Previous
-              </button>
+            {/* Navigation - Hide when adding/editing branches */}
+            {!(STEPS[currentStep].id === "branches" && (isAddingBranch || editingBranchIndex !== null)) && (
+              <div className="flex justify-between pt-8 mt-8 border-t border-white/10">
+                <button
+                  className="btn-minimal btn-secondary-minimal px-6 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handlePrevious}
+                  disabled={currentStep === 0 || isSubmitting}
+                >
+                  Previous
+                </button>
 
-              {isLastStep ? (
-                <button
-                  className="btn-minimal btn-primary-minimal px-8 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={handleSubmit}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <span className="flex items-center gap-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-500/30 border-t-emerald-500"></div>
-                      Setting up...
-                    </span>
-                  ) : (
-                    "Complete Setup"
-                  )}
-                </button>
-              ) : (
-                <button
-                  className="btn-minimal btn-primary-minimal px-8 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={handleNext}
-                  disabled={isSubmitting}
-                >
-                  Next
-                </button>
-              )}
-            </div>
+                {isLastStep ? (
+                  <button
+                    className="btn-minimal btn-primary-minimal px-8 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleSubmit}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? (
+                      <span className="flex items-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-500/30 border-t-emerald-500"></div>
+                        Setting up...
+                      </span>
+                    ) : (
+                      "Complete Setup"
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    className="btn-minimal btn-primary-minimal px-8 py-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleNext}
+                    disabled={isSubmitting}
+                  >
+                    Next
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </motion.div>
       </motion.div>

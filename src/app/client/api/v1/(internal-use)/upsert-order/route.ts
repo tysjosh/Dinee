@@ -64,10 +64,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (status !== "completed" && status !== "active" && status !== "cancelled") {
+  if (status !== "completed" && status !== "active" && status !== "cancelled" && status !== "preparing" && status !== "ready") {
     return new Response(JSON.stringify({ 
       success: false, 
-      error: "Invalid status. Status must be `completed`, `active`, or `cancelled`" 
+      error: "Invalid status. Status must be `active`, `preparing`, `ready`, `completed`, or `cancelled`" 
     }), {
       status: 400,
       headers: { "Content-Type": "application/json" },

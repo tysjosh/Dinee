@@ -1,11 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Order } from "@/types/global";
-import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
 import CallbackModal from "./CallbackModal";
 import OrderCancellationModal from "./OrderCancellationModal";
+import CODPaymentModal from "./CODPaymentModal";
+import WhatsAppOptInModal from "./WhatsAppOptInModal";
 import { useOrders } from "@/contexts";
+import { useMutation, useConvex } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import {
   Clock,
   Phone,
@@ -19,6 +22,8 @@ import {
   ChefHat,
   ChevronDown,
   ChevronUp,
+  Banknote,
+  Bell,
 } from "lucide-react";
 
 export interface CurrentOrdersProps {
@@ -33,7 +38,120 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
   const [cancellationModalOpen, setCancellationModalOpen] = useState(false);
+  const [codPaymentModalOpen, setCodPaymentModalOpen] = useState(false);
+  const [whatsappOptInModalOpen, setWhatsappOptInModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  
+  // Track which phone numbers we've already checked/prompted for opt-in
+  const [checkedPhoneNumbers, setCheckedPhoneNumbers] = useState<Set<string>>(new Set());
+  // Track orders that need opt-in prompt (first-time customers)
+  const [ordersNeedingOptIn, setOrdersNeedingOptIn] = useState<Set<string>>(new Set());
+
+  // Convex client for imperative queries
+  const convex = useConvex();
+
+  // Convex mutations for COD payment
+  const recordCODPaymentMutation = useMutation(api.orders.recordCODPaymentCollection);
+  const recordCODPaymentFailureMutation = useMutation(api.orders.recordCODPaymentFailure);
+  
+  // Convex mutation for customer preferences (WhatsApp opt-in)
+  const upsertPreferencesMutation = useMutation(api.customerPreferences.upsertPreferences);
+
+  /**
+   * Check if customer has existing preferences when orders load
+   * Requirement 13.2: Prompt for WhatsApp opt-in on first order
+   */
+  useEffect(() => {
+    const checkCustomerPreferences = async () => {
+      for (const order of currentOrders) {
+        const phoneNumber = order.phoneNumber;
+        
+        // Skip if no valid phone number or already checked
+        if (!phoneNumber || phoneNumber === "Unknown" || checkedPhoneNumbers.has(phoneNumber)) {
+          continue;
+        }
+
+        // Skip if order already has whatsappOptIn set (preference already recorded)
+        if (order.whatsappOptIn !== undefined) {
+          setCheckedPhoneNumbers(prev => new Set(prev).add(phoneNumber));
+          continue;
+        }
+
+        // Mark as checked to avoid duplicate API calls
+        setCheckedPhoneNumbers(prev => new Set(prev).add(phoneNumber));
+
+        try {
+          // Check if customer has existing preferences in the database
+          const preferences = await convex.query(api.customerPreferences.getByPhoneNumber, {
+            phoneNumber,
+          });
+
+          // If no preferences exist, this is a first-time customer - show opt-in prompt
+          if (preferences === null) {
+            setOrdersNeedingOptIn(prev => new Set(prev).add(order.id));
+          }
+        } catch (error) {
+          console.error("Error checking customer preferences:", error);
+          // On error, still show the opt-in prompt to be safe
+          setOrdersNeedingOptIn(prev => new Set(prev).add(order.id));
+        }
+      }
+    };
+
+    if (currentOrders.length > 0) {
+      checkCustomerPreferences();
+    }
+  }, [currentOrders, checkedPhoneNumbers, convex]);
+
+  /**
+   * Handle WhatsApp opt-in prompt for an order
+   * Shows the opt-in modal for first-time customers
+   */
+  const handleWhatsAppOptIn = (order: Order) => {
+    setSelectedOrder(order);
+    setWhatsappOptInModalOpen(true);
+  };
+
+  /**
+   * Handle WhatsApp opt-in confirmation
+   * Stores preference in customerPreferences table and updates order
+   * Requirement 13.2: Store preference in customerPreferences table
+   */
+  const handleWhatsAppOptInConfirmed = async (orderId: string, phoneNumber: string, optIn: boolean) => {
+    try {
+      actions.setLoading(true);
+      
+      // Store preference in customerPreferences table
+      await upsertPreferencesMutation({
+        phoneNumber,
+        whatsappOptIn: optIn,
+        smsOptIn: false, // Default SMS opt-in to false
+      });
+
+      // Remove from orders needing opt-in
+      setOrdersNeedingOptIn(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(orderId);
+        return newSet;
+      });
+
+      // Update local order state to reflect the opt-in choice
+      const updatedOrder = currentOrders.find(o => o.id === orderId);
+      if (updatedOrder) {
+        actions.updateOrder({
+          ...updatedOrder,
+          whatsappOptIn: optIn,
+        });
+      }
+
+    } catch (error) {
+      console.error("Failed to save WhatsApp preference:", error);
+      actions.setError("Failed to save notification preference");
+      throw error;
+    } finally {
+      actions.setLoading(false);
+    }
+  };
 
   const toggleOrderExpansion = (orderId: string) => {
     const newExpanded = new Set(expandedOrders);
@@ -46,9 +164,9 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat("en-NG", {
       style: "currency",
-      currency: "USD",
+      currency: "NGN",
     }).format(amount);
   };
 
@@ -70,6 +188,66 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const handleCancelOrder = (order: Order) => {
     setSelectedOrder(order);
     setCancellationModalOpen(true);
+  };
+
+  /**
+   * Handle marking an order as complete
+   * For COD orders, show the payment collection modal first (Requirement 10.3)
+   * For non-COD orders, complete directly
+   */
+  const handleCompleteOrder = (order: Order) => {
+    if (order.paymentMethod === "cod" && order.paymentStatus !== "paid") {
+      // COD order - show payment collection modal
+      setSelectedOrder(order);
+      setCodPaymentModalOpen(true);
+    } else {
+      // Non-COD order or already paid - complete directly
+      actions.completeOrder(order.id);
+    }
+  };
+
+  /**
+   * Handle COD payment confirmation (Requirement 10.4)
+   * Updates paymentStatus to "paid" and completes the order
+   */
+  const handleCODPaymentConfirmed = async (orderId: string) => {
+    try {
+      actions.setLoading(true);
+      // Record the COD payment collection
+      await recordCODPaymentMutation({
+        orderId,
+        collectedBy: "staff", // In a real app, this would be the logged-in user
+      });
+      // Complete the order
+      await actions.completeOrder(orderId);
+    } catch (error) {
+      console.error("Failed to record COD payment:", error);
+      actions.setError("Failed to record payment collection");
+    } finally {
+      actions.setLoading(false);
+    }
+  };
+
+  /**
+   * Handle COD payment failure (Requirement 10.5)
+   * Marks paymentStatus as "payment_failed" with a reason
+   */
+  const handleCODPaymentFailed = async (orderId: string, reason: string) => {
+    try {
+      actions.setLoading(true);
+      // Record the payment failure
+      await recordCODPaymentFailureMutation({
+        orderId,
+        failureReason: reason,
+      });
+      // Note: We don't complete the order when payment fails
+      // The order remains active for follow-up
+    } catch (error) {
+      console.error("Failed to record payment failure:", error);
+      actions.setError("Failed to record payment failure");
+    } finally {
+      actions.setLoading(false);
+    }
   };
 
   const handleCallbackConfirm = async (orderId: string, reason: string) => {
@@ -204,6 +382,33 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                           <CheckCircle className="w-3 h-3 mr-1.5" />
                           ACTIVE
                         </Badge>
+                        {/* COD Badge Indicator - Requirement 10.2 */}
+                        {order.paymentMethod === "cod" && (
+                          <Badge
+                            variant="warning"
+                            className="bg-amber-500/20 text-amber-400 border-amber-500/30 px-2.5 py-1 text-xs font-medium"
+                          >
+                            <Banknote className="w-3 h-3 mr-1.5" />
+                            COD
+                            {order.paymentStatus === "paid" && " - PAID"}
+                            {order.paymentStatus === "failed" && " - FAILED"}
+                          </Badge>
+                        )}
+                        {/* Payment Status Badge for non-COD orders */}
+                        {order.paymentMethod && order.paymentMethod !== "cod" && (
+                          <Badge
+                            variant={order.paymentStatus === "paid" ? "success" : "info"}
+                            className={cn(
+                              "px-2.5 py-1 text-xs font-medium",
+                              order.paymentStatus === "paid"
+                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                : "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                            )}
+                          >
+                            {order.paymentMethod.toUpperCase()}
+                            {order.paymentStatus === "paid" && " - PAID"}
+                          </Badge>
+                        )}
                         <div className="flex items-center space-x-1.5 text-white/60 text-xs">
                           <Calendar className="w-3.5 h-3.5" />
                           <span>{formatOrderTime(order.timestamp)}</span>
@@ -366,6 +571,37 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       <Phone className="w-3.5 h-3.5" />
                       <span>Call Customer</span>
                     </button>
+                    {/* WhatsApp Opt-In Button - Requirement 13.2: Prompt for opt-in on first order */}
+                    {ordersNeedingOptIn.has(order.id) && order.whatsappOptIn === undefined && (
+                      <button
+                        className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
+                        onClick={() => handleWhatsAppOptIn(order)}
+                      >
+                        <Bell className="w-3.5 h-3.5" />
+                        <span>Set WhatsApp Notifications</span>
+                      </button>
+                    )}
+                    {/* WhatsApp Status Badge - Show if preference is already set */}
+                    {order.whatsappOptIn !== undefined && (
+                      <div className={cn(
+                        "px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium",
+                        order.whatsappOptIn
+                          ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                          : "bg-white/5 border border-white/10 text-white/60"
+                      )}>
+                        {order.whatsappOptIn ? (
+                          <>
+                            <Bell className="w-3.5 h-3.5" />
+                            <span>WhatsApp: On</span>
+                          </>
+                        ) : (
+                          <>
+                            <Bell className="w-3.5 h-3.5" />
+                            <span>WhatsApp: Off</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <button
                       className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:border-red-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
                       onClick={() => handleCancelOrder(order)}
@@ -374,11 +610,25 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       <span>Cancel Order</span>
                     </button>
                     <button
-                      className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
-                      onClick={() => actions.completeOrder(order.id)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer",
+                        order.paymentMethod === "cod" && order.paymentStatus !== "paid"
+                          ? "bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/30"
+                          : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/30"
+                      )}
+                      onClick={() => handleCompleteOrder(order)}
                     >
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      <span>Mark Complete</span>
+                      {order.paymentMethod === "cod" && order.paymentStatus !== "paid" ? (
+                        <>
+                          <Banknote className="w-3.5 h-3.5" />
+                          <span>Collect Payment & Complete</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>Mark Complete</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -401,6 +651,23 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
         onClose={() => setCancellationModalOpen(false)}
         order={selectedOrder}
         onConfirm={handleCancellationConfirm}
+      />
+
+      {/* COD Payment Collection Modal - Requirements 10.3, 10.4, 10.5 */}
+      <CODPaymentModal
+        isOpen={codPaymentModalOpen}
+        onClose={() => setCodPaymentModalOpen(false)}
+        order={selectedOrder}
+        onConfirmPayment={handleCODPaymentConfirmed}
+        onPaymentFailed={handleCODPaymentFailed}
+      />
+
+      {/* WhatsApp Opt-In Modal - Requirement 13.2: Prompt for opt-in on first order */}
+      <WhatsAppOptInModal
+        isOpen={whatsappOptInModalOpen}
+        onClose={() => setWhatsappOptInModalOpen(false)}
+        order={selectedOrder}
+        onOptInConfirmed={handleWhatsAppOptInConfirmed}
       />
     </div>
   );
