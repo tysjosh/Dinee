@@ -92,8 +92,22 @@ export const updateRestaurant = mutation({
       throw new Error("Restaurant not found");
     }
 
+    // Define proper type for restaurant updates
+    type RestaurantUpdate = {
+      name?: string;
+      agentName?: string;
+      specialInstructions?: string;
+      languagePreference?: "english" | "spanish" | "french";
+      menuDetails?: Array<{
+        name: string;
+        price: string;
+        description?: string;
+      }>;
+      virtualNumber?: string;
+    };
+
     // Only update fields that are provided
-    const updates: any = {};
+    const updates: RestaurantUpdate = {};
     if (args.name !== undefined) updates.name = args.name;
     if (args.agentName !== undefined) updates.agentName = args.agentName;
     if (args.specialInstructions !== undefined) updates.specialInstructions = args.specialInstructions;
@@ -141,8 +155,20 @@ export const deleteRestaurantData = mutation({
 
 
 
+// DANGEROUS: This mutation deletes ALL data. Only use in development.
+// In production, this should be protected by authorization or removed entirely.
 export const deleteAllData = mutation({
-  handler: async (ctx) => {
+  args: {
+    // Require explicit confirmation to prevent accidental deletion
+    confirmDeletion: v.literal("DELETE_ALL_DATA_CONFIRMED"),
+  },
+  handler: async (ctx, args) => {
+    // Additional safety check - only allow in development
+    const isDevelopment = process.env.NODE_ENV === "development";
+    if (!isDevelopment) {
+      throw new Error("deleteAllData is only available in development environment");
+    }
+
     try {
       const allRestaurants = await ctx.db.query("restaurants").collect();
       for (const restaurant of allRestaurants) {
@@ -156,8 +182,7 @@ export const deleteAllData = mutation({
 
       return true;
     } catch (error) {
-      console.log("Error in `deleteAllData`", (error as Error).message);
-      return false;
+      throw new Error(`Failed to delete all data: ${(error as Error).message}`);
     }
   },
 });

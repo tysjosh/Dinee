@@ -213,7 +213,7 @@ const CurrentCalls: React.FC = () => {
                         </span>
                       </div>
                       <div className="text-sm font-mono font-medium text-white">
-                        {call.phoneNumber || "(555) 123-4567"}
+                        {call.phoneNumber || "Unknown"}
                       </div>
                     </div>
 

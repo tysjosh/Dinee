@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Order } from "@/types/global";
 import { Modal } from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
-import { NGROK_URL } from "@/lib/constants";
+import { BACKEND_URL } from "@/lib/constants";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 
 export interface CallbackModalProps {
@@ -44,8 +44,7 @@ const CallbackModal: React.FC<CallbackModalProps> = ({
         <reason>${reason}</reason>`,
         reason: "followup",
       };
-      console.log("Making a callback");
-      await fetch(`${NGROK_URL}/callback`, {
+      await fetch(`${BACKEND_URL}/callback`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

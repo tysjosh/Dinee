@@ -11,7 +11,6 @@ import {
   SHOW_TIMING_MATH,
   SYSTEM_PROMPT,
   VOICE,
-// } from "./server-constants";
 } from "./server-constants.ts";
 import {
   wrapperGetRestaurantDetails,
@@ -19,8 +18,7 @@ import {
   wrapperAddTranscriptDialogues,
   wrapperUpsertOrders,
   generateOrderId,
-  } from "./tools.ts";
-// } from "./tools";
+} from "./tools.ts";
 import twilio from "twilio";
 
 dotenv.config({ path: ".env.local" });
@@ -31,47 +29,43 @@ if (!NEXT_OPENAI_KEY) {
   process.exit(1);
 }
 
+// Type definitions for connection-scoped state
+interface CallbackContext {
+  reason?: string;
+  phoneNumber?: string;
+  isCallback?: boolean;
+  data?: string;
+}
 
-// Keeps the track of the call sid and the phone number
-let FROM_NUMBER: string | null = "";
-let CALL_SID: string | null = "";
-
-// ONLY for the callback
-let CALLBACK_CONTEXT: { reason?: string; phoneNumber?: string; isCallback?: boolean; data?: string } = {};
+// Store for pending callback contexts (keyed by phone number to handle race conditions)
+const pendingCallbacks = new Map<string, CallbackContext>();
 
 const fastify = Fastify({ logger: true });
 fastify.register(fastifyFormBody);
 fastify.register(fastifyWs);
 fastify.register(cors, {
-  // NOTE: Change in production
-  origin: ["*"],
+  origin: process.env.NODE_ENV === "production" 
+    ? [process.env.FRONTEND_URL || ""].filter(Boolean)
+    : ["*"],
   methods: ["GET", "POST"],
 });
 
-
-
-/* test route */
-fastify.all("/testing", async (_req, reply) => {
-  const res = await wrapperGetRestaurantDetails();
-  reply.send(res);
+/* Health check route */
+fastify.all("/health", async (_req, reply) => {
+  reply.send({ status: "ok" });
 });
 
 /* Twilio entry-point */
 fastify.all("/incoming-call", async (request: any, reply) => {
   const callSid = request.body.CallSid || request.query?.CallSid;
   const fromNumber = request.body.From || request.query?.From;
-  const callback = request.query?.callback || null;
-  const reason = request.query?.reason || null;
-  if (callback && reason) {
-
-  }
-  CALL_SID = callSid;
-  FROM_NUMBER = fromNumber;
+  
+  // Pass call context via query params to the WebSocket connection
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
     <Pause length="1"/>
     <Connect>
-    <Stream url="wss://${request.headers.host}/media-stream?callSid=${callSid}&amp;from=${fromNumber || ''}" />
+    <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}" />
     </Connect>
     </Response>
   `;
@@ -85,40 +79,53 @@ fastify.all("/callback", async (request: any, reply) => {
   try {
     const reason = request.body?.reason || request.query?.reason || "General inquiry";
     const phoneNumber = request.body?.phoneNumber || request.query?.phoneNumber;
-    const data = request.body?.data || request.query?.data
+    const data = request.body?.data || request.query?.data;
 
-    CALLBACK_CONTEXT = {
-      reason: reason[0],
+    if (!phoneNumber) {
+      return reply.status(400).send({ error: "Phone number is required" });
+    }
+
+    // Store callback context keyed by phone number
+    const callbackContext: CallbackContext = {
+      reason: Array.isArray(reason) ? reason[0] : reason,
       phoneNumber,
-      data: JSON.stringify(data),
+      data: typeof data === "string" ? data : JSON.stringify(data),
       isCallback: true
     };
+    
+    pendingCallbacks.set(phoneNumber, callbackContext);
 
     const client = twilio(process.env.NEXT_TWILIO_SID, process.env.NEXT_TWILIO_AUTH_TOKEN);
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Pause length="1"/>
       <Connect>
-      <Stream url="wss://${request.headers.host}/media-stream-callback" />
+      <Stream url="wss://${request.headers.host}/media-stream-callback?phone=${encodeURIComponent(phoneNumber)}" />
       </Connect>
     </Response>`;
-    const call = await client.calls.create({
+    
+    await client.calls.create({
       from: process.env.NEXT_VIRTUAL_NUMBER,
       to: phoneNumber,
       twiml,
     });
-    console.log(call.sid);
+    
+    return reply.send({ success: true });
   } catch (error) {
-    console.log(error.message!)
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return reply.status(500).send({ error: errorMessage });
   }
-  return
 });
 
 /* websocket */
 fastify.register(async (fastify) => {
   // route for connecting OpenAI live api with the incoming call
   fastify.get("/media-stream", { websocket: true }, (connection, req) => {
-    console.log("🔗 WebSocket connected");
+    // Extract connection-scoped state from query params
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const callSid = url.searchParams.get("callSid") || "";
+    const fromNumber = url.searchParams.get("from") || "";
+    
     // Connection-specific state
     let streamSid: string | null = null;
     let latestMediaTimestamp = 0;
@@ -129,7 +136,6 @@ fastify.register(async (fastify) => {
     // Transcription state
     let restaurantIdConfirmed = false;
     let currentRestaurantId: string | null = null;
-    let currentAITranscript = "";
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -319,17 +325,14 @@ fastify.register(async (fastify) => {
     const saveTranscriptIfConfirmed = async (dialogue: string, speaker: 'human' | 'ai') => {
       if (restaurantIdConfirmed && currentRestaurantId) {
         try {
-          console.log(`📝 Saving transcript: ${speaker}: ${dialogue}`);
           await wrapperAddTranscriptDialogues({
             dialogue,
             speaker,
-            callId: CALL_SID
+            callId: callSid
           });
         } catch (error) {
           console.error("Error saving transcript:", error);
         }
-      } else {
-        console.log(`📝 Transcript not saved (restaurant ID not confirmed): ${speaker}: ${dialogue}`);
       }
     };
 
@@ -396,7 +399,6 @@ fastify.register(async (fastify) => {
       }
 
       if (res.type === "conversation.item.input_audio_transcription.completed") {
-        console.log("🎤 Human transcript completed:", res.transcript);
         // Save the completed human transcript
         await saveTranscriptIfConfirmed(res.transcript, 'human');
       }
@@ -404,41 +406,36 @@ fastify.register(async (fastify) => {
       // Function call from the model
       if (res.type === "response.function_call_arguments.done") {
         const args = JSON.parse(res.arguments);
-        let output: any = { success: false };
+        let output: Record<string, unknown> = { success: false };
 
         try {
-          console.log("Calling Tool")
           switch (res.name) {
             case "get_restaurant_details":
-              console.log("👨‍🍳 Getting restaurant details")
-              output = await wrapperGetRestaurantDetails(args.restaurant_id);
+              output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
               // If restaurant details are successfully retrieved, mark as confirmed
               if (output.success) {
                 restaurantIdConfirmed = true;
                 currentRestaurantId = args.restaurant_id;
-                console.log("✅ Restaurant ID confirmed:", args.restaurant_id);
               }
               break;
             case "add_transcript_dialogue":
-              console.log("🗣️ Adding transcript dialogue")
               output = await wrapperAddTranscriptDialogues({
                 ...args,
-                callId: CALL_SID
-              });
+                callId: callSid
+              }) as Record<string, unknown>;
               break;
             case "upsert_order":
               output = await wrapperUpsertOrders({
                 ...args,
-                callId: CALL_SID, // Call id from Twilio,
-              });
+                callId: callSid,
+              }) as Record<string, unknown>;
               break;
-            // Update the call data
             case "upsert_call_data":
               output = await wrapperUpsertCallData({
                 ...args,
-                callId: CALL_SID,
-              });
-              break
+                callId: callSid,
+              }) as Record<string, unknown>;
+              break;
             case "generate_order_id":
               output = { order_id: generateOrderId() };
               break;
@@ -493,9 +490,8 @@ fastify.register(async (fastify) => {
       // Capture AI responses from text content for transcription
       if (res.type === "response.content.done") {
         if (res.content && Array.isArray(res.content)) {
-          const textContent = res.content.find((item: any) => item.type === 'text');
+          const textContent = res.content.find((item: { type: string; text?: string }) => item.type === 'text');
           if (textContent && textContent.text) {
-            console.log("💬 AI Response Text:", textContent.text);
             // Save the AI response transcript
             await saveTranscriptIfConfirmed(textContent.text, 'ai');
           }
@@ -508,9 +504,8 @@ fastify.register(async (fastify) => {
         if (res.response.output && res.response.output.length > 0) {
           const output = res.response.output[0];
           if (output.content && output.content.length > 0) {
-            const textContent = output.content.find((item: any) => item.type === 'text');
+            const textContent = output.content.find((item: { type: string; text?: string }) => item.type === 'text');
             if (textContent && textContent.text) {
-              console.log("💬 AI Response (fallback):", textContent.text);
               await saveTranscriptIfConfirmed(textContent.text, 'ai');
             }
           }
@@ -520,27 +515,24 @@ fastify.register(async (fastify) => {
 
     // OpenAI socket lifecycle
     oaWs.on("open", async () => {
-      console.log("Connected to the OpenAI Realtime API");
-      console.log("Upserting the data")
       await wrapperUpsertCallData({
-        callId: CALL_SID,
-        phoneNumber: FROM_NUMBER,
+        callId: callSid,
+        phoneNumber: fromNumber,
         status: "active",
         restaurantId: "unknown"
       });
       initializeSession();
       setTimeout(greet, 200);
     });
-    oaWs.on("close", async (code, reason) => {
-      console.log("🤖 OpenAI socket closed:", code, reason.toString());
+    oaWs.on("close", async () => {
       // Update the call status to completed
       await wrapperUpsertCallData({
-        callId: CALL_SID,
+        callId: callSid,
         status: "completed",
       });
     });
-    oaWs.on("error", err => {
-      console.error("😵 OpenAI socket error:", err);
+    oaWs.on("error", (err) => {
+      console.error("OpenAI socket error:", err);
     });
 
     // Twilio socket lifecycle
@@ -558,15 +550,20 @@ fastify.register(async (fastify) => {
 
   // Callback route
   fastify.get("/media-stream-callback", { websocket: true }, (connection, req) => {
-    console.log("🔗 Callback WebSocket connected");
+    // Extract phone number from query params to get callback context
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const phoneNumber = url.searchParams.get("phone") || "";
+    
+    // Get and remove callback context for this phone number
+    const callbackContext = pendingCallbacks.get(phoneNumber) || {};
+    pendingCallbacks.delete(phoneNumber);
+    
     // Connection-specific state
     let streamSid: string | null = null;
     let latestMediaTimestamp = 0;
     let lastAssistantItem: string | null = null;
     let markQueue: string[] = [];
     let responseStartTimestampTwilio: number | null = null;
-
-
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -578,10 +575,11 @@ fastify.register(async (fastify) => {
         },
       },
     );
-    let agentTools = []
-    let systemPrompt = ""
-    console.log(CALLBACK_CONTEXT.reason)
-    if (CALLBACK_CONTEXT.reason === "followup") {
+    
+    let agentTools: Array<Record<string, unknown>> = [];
+    let systemPrompt = "";
+    
+    if (callbackContext.reason === "followup") {
       // Assign the tools here
       agentTools = [
         // Get restaurant details tool
@@ -664,16 +662,10 @@ fastify.register(async (fastify) => {
         // parameters: { type: "object", properties: {}, required: [] }
         // },
       ]
-      systemPrompt = FOLLOWUP_SYSTEM_PROMPT
-    } else if (CALLBACK_CONTEXT.reason === "cancellation") {
-      systemPrompt = CANCELLATION_SYSTEM_PROMPT
+      systemPrompt = FOLLOWUP_SYSTEM_PROMPT;
+    } else if (callbackContext.reason === "cancellation") {
+      systemPrompt = CANCELLATION_SYSTEM_PROMPT;
     }
-
-    console.log(CALLBACK_CONTEXT.reason)
-    console.log(systemPrompt)
-
-    console.log("Agent tools")
-    console.log(agentTools)
     const initializeSession = () => {
       oaWs.send(
         JSON.stringify({
@@ -702,7 +694,7 @@ fastify.register(async (fastify) => {
             content: [
               {
                 type: "input_text",
-                text: `Greet the caller. The details of the order and the reason for the call is: <data>${CALLBACK_CONTEXT.data}</data><reason>${CALLBACK_CONTEXT.reason}</reason>`,
+                text: `Greet the caller. The details of the order and the reason for the call is: <data>${callbackContext.data || ""}</data><reason>${callbackContext.reason || ""}</reason>`,
               },
             ],
           },
@@ -819,43 +811,24 @@ fastify.register(async (fastify) => {
 
       // Handle real-time transcription events for human input
       if (res.type === "conversation.item.input_audio_transcription.delta") {
-        console.log("🎤 Human speaking (delta):", res);
-        console.log("🎤 Human speaking (delta):", res.delta);
-        // You can use delta for real-time display if needed
+        // Delta events can be used for real-time display if needed
       }
 
       // Function call from the model
       if (res.type === "response.function_call_arguments.done") {
         const args = JSON.parse(res.arguments);
-        let output: any = { success: false };
+        let output: Record<string, unknown> = { success: false };
 
         try {
-          console.log("Calling Tool")
           switch (res.name) {
             case "get_restaurant_details":
-              console.log("👨‍🍳 Getting restaurant details")
-              output = await wrapperGetRestaurantDetails(args.restaurant_id);
-              // If restaurant details are successfully retrieved, mark as confirmed
-              break;
-            case "add_transcript_dialogue":
-              console.log("🗣️ Adding transcript dialogue")
-              output = await wrapperAddTranscriptDialogues({
-                ...args,
-                callId: CALL_SID
-              });
+              output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
               break;
             case "upsert_order":
               output = await wrapperUpsertOrders({
                 ...args,
-              });
+              }) as Record<string, unknown>;
               break;
-            // Update the call data
-            case "upsert_call_data":
-              output = await wrapperUpsertCallData({
-                ...args,
-                callId: CALL_SID,
-              });
-              break
             case "generate_order_id":
               output = { order_id: generateOrderId() };
               break;
@@ -911,26 +884,24 @@ fastify.register(async (fastify) => {
 
     // OpenAI socket lifecycle
     oaWs.on("open", async () => {
-      console.log("Connected to the OpenAI Realtime API");
       initializeSession();
       setTimeout(greet, 200);
     });
-    oaWs.on("close", async (code, reason) => {
-      console.log("🤖 OpenAI socket closed:", code, reason.toString());
+    oaWs.on("close", async () => {
+      // Callback completed
     });
-    oaWs.on("error", err => {
-      console.error("😵 OpenAI socket error:", err);
+    oaWs.on("error", (err) => {
+      console.error("OpenAI socket error:", err);
     });
 
     // Twilio socket lifecycle
     connection.on("close", () => {
-      console.log("📵 Twilio socket closed");
       // Shuts down the openAI socket
       if (oaWs.readyState === WebSocket.OPEN) oaWs.close();
     });
 
-    connection.on("error", err => {
-      console.error("😵 Twilio socket error:", err);
+    connection.on("error", (err) => {
+      console.error("Twilio socket error:", err);
     });
   });
 });

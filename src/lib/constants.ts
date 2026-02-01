@@ -13,8 +13,8 @@ export const PROMPT_READ_MENU = `{
 
 // Server configuration
 export const SERVER_URL = `http://localhost:${process.env.NEXT_PUBLIC_BACKEND_PORT}`;
-// NOTE: NGROK URL/ Backend HERE
-export const NGROK_URL = "https://e853935361d4.ngrok-free.app";
+// Backend URL - use environment variable in production
+export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 export const SAMPLE_ORDER_ITEMS: OrderItem[] = [
   {
     id: 'item-001',

@@ -2,15 +2,9 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "motion/react";
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
-import Button from "@/components/ui/Button";
-import Input from "@/components/ui/Input";
-import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import CustomRadio from "@/components/ui/CustomRadio";
-import { Restaurant, LanguagePreference } from "@/types/global";
+import { LanguagePreference } from "@/types/global";
 import MenuDetails from "./menu-details";
-import { useRouter } from "next/navigation";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 import { MinimalHeader } from "@/components/ui/Header";
 
@@ -88,7 +82,6 @@ const LANGUAGE_OPTIONS: {
  * configuring their restaurant information and AI agent settings
  */
 const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
-  const router = useRouter();
   const { saveRestaurantData } = useRestaurantStorage();
 
   const [currentStep, setCurrentStep] = useState(0);

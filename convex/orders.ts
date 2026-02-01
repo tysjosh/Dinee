@@ -75,8 +75,26 @@ export const updateOrder = mutation({
   handler: async (ctx, args) => {
     const { orderId, ...updates } = args;
 
+    // Define proper type for order updates
+    type OrderUpdate = {
+      callId?: string;
+      phoneNumber?: string;
+      customerName?: string;
+      items?: Array<{
+        id: string;
+        name: string;
+        quantity: number;
+        price: number;
+        specialInstructions?: string;
+      }>;
+      totalAmount?: number;
+      specialInstructions?: string;
+      status?: "active" | "completed" | "cancelled";
+      cancellationReason?: string;
+    };
+
     // Only update fields that are provided
-    const fieldsToUpdate: any = {};
+    const fieldsToUpdate: OrderUpdate = {};
     if (updates.callId !== undefined) fieldsToUpdate.callId = updates.callId;
     if (updates.phoneNumber !== undefined) fieldsToUpdate.phoneNumber = updates.phoneNumber;
     if (updates.customerName !== undefined) fieldsToUpdate.customerName = updates.customerName;

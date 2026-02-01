@@ -1,9 +1,7 @@
 import React, { useState } from "react";
 import { Order } from "@/types/global";
 import { Modal } from "@/components/ui/Modal";
-import Button from "@/components/ui/Button";
-import { NGROK_URL, SERVER_URL } from "@/lib/constants";
-import { useRestaurant } from "@/contexts";
+import { BACKEND_URL } from "@/lib/constants";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 
 export interface OrderCancellationModalProps {
@@ -71,8 +69,7 @@ const OrderCancellationModal: React.FC<OrderCancellationModalProps> = ({
       <reason>${reason}</reason>`,
       reason: "cancellation",
     };
-    console.log("Sending the request to the ");
-    await fetch(`${NGROK_URL}/callback`, {
+    await fetch(`${BACKEND_URL}/callback`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
