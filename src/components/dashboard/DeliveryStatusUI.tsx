@@ -209,7 +209,7 @@ function formatRelativeTime(timestamp: Date | number): string {
 function DeliveryMetricsPanel({ metrics }: { metrics?: BranchDeliveryMetrics }) {
   if (!metrics) {
     return (
-      <div className="card p-6">
+      <div className="bg-black border border-white/10 rounded-xl p-6">
         <div className="flex items-center space-x-3 mb-4">
           <div className="p-2 bg-white/5 rounded-lg border border-white/10">
             <Timer className="w-5 h-5 text-white/60" />
@@ -222,7 +222,7 @@ function DeliveryMetricsPanel({ metrics }: { metrics?: BranchDeliveryMetrics }) 
   }
 
   return (
-    <div className="card p-6">
+    <div className="bg-black border border-white/10 rounded-xl p-6">
       <div className="flex items-center space-x-3 mb-6">
         <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
           <Timer className="w-5 h-5 text-emerald-400" />
@@ -409,9 +409,9 @@ function StatusGroup({
   }
 
   return (
-    <div className={cn("rounded-xl overflow-hidden", config.bgColor, config.borderColor, "border")}>
+    <div className={cn("rounded-xl overflow-hidden bg-black", config.borderColor, "border")}>
       {/* Group header */}
-      <div className="p-4 border-b border-white/10">
+      <div className="p-4 border-b border-white/10 bg-white/5">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className={cn("p-2 rounded-lg", config.bgColor, config.borderColor, "border")}>
@@ -568,7 +568,7 @@ export function DeliveryStatusUI({
 
       {/* Empty state */}
       {orders.length === 0 && (
-        <div className="card p-12 text-center">
+        <div className="bg-black border border-white/10 rounded-xl p-12 text-center">
           <div className="w-16 h-16 mx-auto mb-4 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
             <MapPin className="w-8 h-8 text-white/40" />
           </div>

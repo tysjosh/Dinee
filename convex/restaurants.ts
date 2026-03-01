@@ -70,6 +70,19 @@ export const getRestaurant = query({
   },
 });
 
+// Get all restaurants (for admin/seed purposes)
+export const getAllRestaurants = query({
+  args: {},
+  handler: async (ctx) => {
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .order("desc")
+      .collect();
+
+    return restaurants;
+  },
+});
+
 // Get all restaurants for a specific platform
 export const getRestaurantsByPlatform = query({
   args: { platformId: v.string() },

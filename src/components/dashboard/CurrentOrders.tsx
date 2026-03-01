@@ -6,6 +6,7 @@ import CallbackModal from "./CallbackModal";
 import OrderCancellationModal from "./OrderCancellationModal";
 import CODPaymentModal from "./CODPaymentModal";
 import WhatsAppOptInModal from "./WhatsAppOptInModal";
+import DeliveryStatusModal from "./DeliveryStatusModal";
 import { useOrders } from "@/contexts";
 import { useMutation, useConvex } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -24,6 +25,9 @@ import {
   ChevronUp,
   Banknote,
   Bell,
+  Truck,
+  Package,
+  Navigation,
 } from "lucide-react";
 
 export interface CurrentOrdersProps {
@@ -40,6 +44,7 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const [cancellationModalOpen, setCancellationModalOpen] = useState(false);
   const [codPaymentModalOpen, setCodPaymentModalOpen] = useState(false);
   const [whatsappOptInModalOpen, setWhatsappOptInModalOpen] = useState(false);
+  const [deliveryStatusModalOpen, setDeliveryStatusModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   
   // Track which phone numbers we've already checked/prompted for opt-in
@@ -56,6 +61,9 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   
   // Convex mutation for customer preferences (WhatsApp opt-in)
   const upsertPreferencesMutation = useMutation(api.customerPreferences.upsertPreferences);
+
+  // Convex mutation for delivery status updates
+  const updateDeliveryStatusMutation = useMutation(api.orders.updateDeliveryStatus);
 
   /**
    * Check if customer has existing preferences when orders load
@@ -188,6 +196,56 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const handleCancelOrder = (order: Order) => {
     setSelectedOrder(order);
     setCancellationModalOpen(true);
+  };
+
+  /**
+   * Handle opening delivery status modal
+   */
+  const handleDeliveryStatus = (order: Order) => {
+    setSelectedOrder(order);
+    setDeliveryStatusModalOpen(true);
+  };
+
+  /**
+   * Handle delivery status update
+   * Updates the delivery status in the database
+   */
+  const handleDeliveryStatusUpdate = async (
+    orderId: string,
+    status: "assigned" | "dispatched" | "in_transit" | "delivered" | "failed",
+    riderName?: string,
+    riderId?: string,
+    failureReason?: string
+  ) => {
+    try {
+      actions.setLoading(true);
+      
+      await updateDeliveryStatusMutation({
+        orderId,
+        deliveryStatus: status,
+        riderId,
+        riderName,
+        deliveryFailureReason: failureReason,
+        sendStatusMessage: true,
+      });
+
+      // Update local state
+      const updatedOrder = currentOrders.find(o => o.id === orderId);
+      if (updatedOrder) {
+        actions.updateOrder({
+          ...updatedOrder,
+          deliveryStatus: status,
+          riderId,
+          riderName,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to update delivery status:", error);
+      actions.setError("Failed to update delivery status");
+      throw error;
+    } finally {
+      actions.setLoading(false);
+    }
   };
 
   /**
@@ -409,6 +467,36 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                             {order.paymentStatus === "paid" && " - PAID"}
                           </Badge>
                         )}
+                        {/* Delivery Status Badge */}
+                        {order.deliveryStatus && order.deliveryStatus !== "pending" && (
+                          <Badge
+                            variant={
+                              order.deliveryStatus === "delivered" ? "success" :
+                              order.deliveryStatus === "failed" ? "error" :
+                              "info"
+                            }
+                            className={cn(
+                              "px-2.5 py-1 text-xs font-medium",
+                              order.deliveryStatus === "delivered"
+                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                : order.deliveryStatus === "failed"
+                                  ? "bg-red-500/20 text-red-400 border-red-500/30"
+                                  : order.deliveryStatus === "in_transit"
+                                    ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
+                                    : order.deliveryStatus === "dispatched"
+                                      ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                      : "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                            )}
+                          >
+                            {order.deliveryStatus === "assigned" && <User className="w-3 h-3 mr-1.5" />}
+                            {order.deliveryStatus === "dispatched" && <Package className="w-3 h-3 mr-1.5" />}
+                            {order.deliveryStatus === "in_transit" && <Navigation className="w-3 h-3 mr-1.5" />}
+                            {order.deliveryStatus === "delivered" && <CheckCircle className="w-3 h-3 mr-1.5" />}
+                            {order.deliveryStatus === "failed" && <XCircle className="w-3 h-3 mr-1.5" />}
+                            {order.deliveryStatus.replace("_", " ").toUpperCase()}
+                            {order.riderName && ` - ${order.riderName}`}
+                          </Badge>
+                        )}
                         <div className="flex items-center space-x-1.5 text-white/60 text-xs">
                           <Calendar className="w-3.5 h-3.5" />
                           <span>{formatOrderTime(order.timestamp)}</span>
@@ -571,6 +659,18 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       <Phone className="w-3.5 h-3.5" />
                       <span>Call Customer</span>
                     </button>
+                    {/* Delivery Status Button */}
+                    <button
+                      className="bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
+                      onClick={() => handleDeliveryStatus(order)}
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>
+                        {order.deliveryStatus && order.deliveryStatus !== "pending"
+                          ? "Update Delivery"
+                          : "Manage Delivery"}
+                      </span>
+                    </button>
                     {/* WhatsApp Opt-In Button - Requirement 13.2: Prompt for opt-in on first order */}
                     {ordersNeedingOptIn.has(order.id) && order.whatsappOptIn === undefined && (
                       <button
@@ -668,6 +768,14 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
         onClose={() => setWhatsappOptInModalOpen(false)}
         order={selectedOrder}
         onOptInConfirmed={handleWhatsAppOptInConfirmed}
+      />
+
+      {/* Delivery Status Modal - Manual delivery status management */}
+      <DeliveryStatusModal
+        isOpen={deliveryStatusModalOpen}
+        onClose={() => setDeliveryStatusModalOpen(false)}
+        order={selectedOrder}
+        onUpdateStatus={handleDeliveryStatusUpdate}
       />
     </div>
   );

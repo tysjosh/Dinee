@@ -35,6 +35,9 @@ export type { CODReconciliationSummaryProps, CODReconciliationData, CODCollectio
 export { default as WhatsAppOptInModal } from './WhatsAppOptInModal';
 export type { WhatsAppOptInModalProps } from './WhatsAppOptInModal';
 
+export { default as DeliveryStatusModal } from './DeliveryStatusModal';
+export type { DeliveryStatusModalProps } from './DeliveryStatusModal';
+
 export { default as PlatformDashboard } from './PlatformDashboard';
 export type { PlatformDashboardProps } from './PlatformDashboard';
 

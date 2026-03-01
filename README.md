@@ -1,34 +1,194 @@
-## Inspiration
-AI voice agents are impacting every industry, from banking to software. To extend this initiative, I built a voice AI agent for restaurants that specializes in handling multiple calls simultaneously, adding and updating orders, calling back customers, providing updates, and all of this without human intervention.
+# Dinee - AI Voice Agent for Restaurants
 
-## What it does
-The main aim of the software is simple: to ease the workload of restaurant owners so they can focus on serving their customers.
+A comprehensive restaurant call management system enabling restaurant owners to manage AI-powered phone calls and orders through a web dashboard. The application bridges automated AI agents handling customer calls with restaurant staff managing orders and operations.
 
-### A few key features Dinee provides:
-1. **Handling Calls:** The agent assists users on both inbound and outbound calls.
-2. **Order Taking and General Query:** **Dinee** excels at taking orders, updating transcripts of the conversation, and answering general questions.
-3. **Calling Back the Customer:** Restaurants can command the agent to call back customers to clarify or provide updates about orders.
-4. **Handling Multiple Calls Simultaneously:** While staff are limited in how many calls they can take at once, **Dinee** can handle any number of calls all at the same time.
+## Features
 
-## How we built it
-1. The application was built entirely in **Kiro** from frontend to backend, integrating OpenAI Live API, migrating to shadcn-style design, and even generating commit messages (thanks to Kiro hooks).
-2. We used **Kiro IDE** to generate systematic plans, organize code, modularize everything, and even clean up unused files in the codebase.
-3. **Technology and tools used:**
-   - **Frontend:** Next.js, TailwindCSS
-   - **Backend:** Fastify (Node.js), Next.js, Convex, Twilio
-   - **LLM:** Gemini, OpenAI
+### Core Capabilities
+- **AI-Powered Call Management**: Virtual numbers, real-time monitoring, transcription
+- **Order Processing**: Automated capture, menu integration, status tracking
+- **Multi-Location Support**: Branch management with intelligent order routing
+- **Real-time Dashboard**: Live call monitoring, order management, analytics
 
-## Challenges we ran into
-- One of the biggest challenges was displaying calls, orders, and other information in real time, so restaurants are notified immediately when Dinee handles a new call or an order is placed. We solved this using Convex DB’s native realtime API, which is perfect for applications like this.
-- Another big challenge was integrating the OpenAI Live API with Twilio. Our solution forwards all incoming and outgoing calls to a custom websocket server, which handles all bi-directional communication.
+### Nigeria Market Features
+- **Multi-Tenancy**: Platform-level management for multiple restaurants
+- **Nigerian Payments**: Paystack, Flutterwave, Cash on Delivery (COD)
+- **WhatsApp Integration**: Order confirmations and status updates
+- **Voice Support**: Nigerian English and Pidgin language support
+- **Delivery Tracking**: Real-time rider status and delivery updates
+- **Fraud Detection**: Automated blocking of suspicious activity
 
-## Accomplishments we're proud of
-- This hackathon turned me into a professional Vibe coder special thanks to **Kiro IDE**.
-- Without referencing docs for Fastify, OpenAI Live API, or Twilio, I was able to integrate all three together. All thanks to **Kiro** for making this possible.
+### Partner API
+- RESTful API for third-party integrations
+- Webhook subscriptions for real-time events
+- API key management with rate limiting
 
-## What we learned
-- First and foremost, I found a new IDE I can rely on. This will increase the speed of my future software releases.
-- I also gained hands-on experience with new technologies such as Twilio and OpenAI Live API.
+## Tech Stack
 
-## What's next for Dinee - Voice AI Agent for Restaurants
-- The vision for **Dinee** is to integrate with third-party vendors like Clove, making it even easier for restaurant owners to use this software built with **Kiro**.
+- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS v4
+- **Backend**: Convex (real-time database & serverless functions)
+- **AI Integration**: Google Gemini API for menu data extraction
+- **Voice**: OpenAI Live API, Twilio
+- **Payments**: Paystack, Flutterwave
+- **Messaging**: WhatsApp Business API
+
+## Getting Started
+
+### Prerequisites
+- Node.js 18+
+- npm or yarn
+- Convex account (free tier available)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd Dinee
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Set up environment variables:
+```bash
+cp .env.example .env.local
+```
+
+4. Configure your `.env.local` with required credentials:
+```env
+# Convex (auto-populated on first run)
+CONVEX_DEPLOYMENT=
+NEXT_PUBLIC_CONVEX_URL=
+
+# Google Gemini API
+GEMINI_API_KEY=
+
+# Twilio (for voice calls)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+
+# Payment Providers (optional)
+PAYSTACK_SECRET_KEY=
+FLUTTERWAVE_SECRET_KEY=
+```
+
+### Running the Application
+
+Start both Convex backend and Next.js frontend:
+
+**Terminal 1 - Convex backend:**
+```bash
+npm run convex:dev
+```
+
+**Terminal 2 - Next.js frontend:**
+```bash
+npm run dev
+```
+
+The app will be available at `http://localhost:3000`.
+
+### Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start Next.js development server |
+| `npm run convex:dev` | Start Convex development server |
+| `npm run build` | Build for production |
+| `npm run lint` | Run ESLint |
+| `npm run type-check` | Run TypeScript type checking |
+| `npm run server:start:dev` | Start WebSocket server (for voice) |
+
+## Project Structure
+
+```
+├── convex/                 # Convex backend (database schema, mutations, queries)
+│   ├── schema.ts          # Database schema definitions
+│   ├── orders.ts          # Order-related operations
+│   ├── calls.ts           # Call management
+│   ├── restaurants.ts     # Restaurant operations
+│   └── ...
+├── src/
+│   ├── app/               # Next.js App Router
+│   │   ├── client/        # Client-side routes and API
+│   │   └── ws-server/     # WebSocket server for voice
+│   ├── components/        # React components
+│   │   ├── dashboard/     # Dashboard feature components
+│   │   ├── onboarding/    # Onboarding flow components
+│   │   └── ui/            # Reusable UI components
+│   ├── contexts/          # React Context providers
+│   ├── hooks/             # Custom React hooks
+│   └── lib/               # Utility libraries and services
+│       ├── analytics/     # Analytics and metrics
+│       ├── billing/       # Subscription management
+│       ├── delivery/      # Delivery tracking
+│       ├── fraud/         # Fraud detection
+│       ├── messaging/     # WhatsApp/SMS messaging
+│       ├── monitoring/    # System monitoring
+│       ├── partner-api/   # Partner API services
+│       ├── payment/       # Payment providers
+│       ├── routing/       # Order routing
+│       └── voice/         # Voice service providers
+└── .kiro/                 # Kiro IDE configuration
+    └── specs/             # Feature specifications
+```
+
+## Architecture
+
+### Data Flow
+1. **Incoming Calls**: Twilio → WebSocket Server → OpenAI Live API → Convex
+2. **Orders**: AI Agent → Convex → Real-time Dashboard
+3. **Payments**: Customer → Paystack/Flutterwave → Webhook → Convex
+4. **Notifications**: Order Events → WhatsApp/SMS → Customer
+
+### Multi-Tenancy Model
+- **Platform**: Top-level organization managing multiple restaurants
+- **Restaurant**: Business entity with settings and menu
+- **Branch**: Physical location with operating hours and capacity
+
+## Development
+
+### Code Style
+- TypeScript strict mode enabled
+- ESLint for code quality
+- Tailwind CSS v4 with CSS-first configuration
+- Component-based architecture with custom hooks
+
+### Adding New Features
+1. Define schema changes in `convex/schema.ts`
+2. Create mutations/queries in `convex/`
+3. Build UI components in `src/components/`
+4. Add service logic in `src/lib/`
+
+## Deployment
+
+### Convex Backend
+```bash
+npx convex deploy
+```
+
+### Next.js Frontend
+Deploy to Vercel, Render, or any Node.js hosting platform.
+
+See `DEPLOYMENT.md` for detailed deployment instructions.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Acknowledgments
+
+- Built with [Kiro IDE](https://kiro.dev)
+- Powered by [Convex](https://convex.dev)
+- Voice AI by [OpenAI](https://openai.com)
