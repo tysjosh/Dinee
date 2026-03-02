@@ -52,6 +52,7 @@ export type DeliveryStatus = 'pending' | 'assigned' | 'dispatched' | 'in_transit
 
 export interface Order {
   id: string;
+  publicOrderCode?: string;
   callId?: string;
   phoneNumber: string;
   customerName: string;

@@ -85,7 +85,7 @@ async function fetchOrder(
   orderId: string
 ): Promise<Order | null> {
   try {
-    const orderDoc = await convexClient.query(api.orders.getOrderByOrderId, {
+    const orderDoc = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
     });
 
@@ -178,7 +178,7 @@ async function updateOrderWithMessageId(
 ): Promise<void> {
   try {
     // First get the order to get its _id
-    const orderDoc = await convexClient.query(api.orders.getOrderByOrderId, {
+    const orderDoc = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
     });
 

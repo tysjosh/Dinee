@@ -424,7 +424,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StatusUpd
   
   try {
     // Get the order to verify it exists and check rider assignment
-    const order = await convexClient.query(api.orders.getOrderByOrderId, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
     
     if (!order) {
       logAuditEntry({
@@ -483,6 +483,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StatusUpd
     // Update the delivery status
     await convexClient.mutation(api.orders.updateDeliveryStatus, {
       orderId,
+      restaurantId: order.restaurantId,
       deliveryStatus: status,
       riderId,
       riderName: riderName || order.riderName,
@@ -493,7 +494,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StatusUpd
     
     // Fetch the updated order to return in response
     // @requirements 15.6 - Return updated order details in the response
-    const updatedOrder = await convexClient.query(api.orders.getOrderByOrderId, { orderId });
+    const updatedOrder = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
     
     // Log successful API call
     logAuditEntry({

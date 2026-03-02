@@ -130,6 +130,8 @@ export default defineSchema({
   orders: defineTable({
     // This order id is given to the cx and used to track the order 
     orderId: v.string(),
+    // Human-readable 6-char code for customer-facing references (voice readback, dashboard display)
+    publicOrderCode: v.optional(v.string()),
     restaurantId: v.string(),
     branchId: v.optional(v.string()), // Branch-specific orders
     callId: v.optional(v.string()), // callSid from Twilio
@@ -217,8 +219,10 @@ export default defineSchema({
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
     .index("by_order_and_restaurant_id", ["orderId", "restaurantId"])
+    .index("by_order_id", ["orderId"])
     .index("by_payment_status", ["paymentStatus"])
-    .index("by_delivery_status", ["deliveryStatus"]),
+    .index("by_delivery_status", ["deliveryStatus"])
+    .index("by_public_order_code_and_restaurant", ["publicOrderCode", "restaurantId"]),
 
   // Transcripts
   transcripts: defineTable({

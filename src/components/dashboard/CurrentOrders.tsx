@@ -220,8 +220,15 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
     try {
       actions.setLoading(true);
       
+      // Find the order to get restaurantId
+      const order = currentOrders.find(o => o.id === orderId);
+      if (!order?.restaurantId) {
+        throw new Error("Order or restaurantId not found");
+      }
+
       await updateDeliveryStatusMutation({
         orderId,
+        restaurantId: order.restaurantId,
         deliveryStatus: status,
         riderId,
         riderName,
@@ -271,9 +278,15 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const handleCODPaymentConfirmed = async (orderId: string) => {
     try {
       actions.setLoading(true);
+      // Find the order to get restaurantId
+      const order = currentOrders.find(o => o.id === orderId);
+      if (!order?.restaurantId) {
+        throw new Error("Order or restaurantId not found");
+      }
       // Record the COD payment collection
       await recordCODPaymentMutation({
         orderId,
+        restaurantId: order.restaurantId,
         collectedBy: "staff", // In a real app, this would be the logged-in user
       });
       // Complete the order
@@ -293,9 +306,15 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
   const handleCODPaymentFailed = async (orderId: string, reason: string) => {
     try {
       actions.setLoading(true);
+      // Find the order to get restaurantId
+      const order = currentOrders.find(o => o.id === orderId);
+      if (!order?.restaurantId) {
+        throw new Error("Order or restaurantId not found");
+      }
       // Record the payment failure
       await recordCODPaymentFailureMutation({
         orderId,
+        restaurantId: order.restaurantId,
         failureReason: reason,
       });
       // Note: We don't complete the order when payment fails
@@ -315,7 +334,8 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
       console.log("Callback confirmed for order:", orderId, "Reason:", reason);
       // Simulate API call
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      alert(`Callback initiated for Order #${orderId}`);
+      const displayOrder = selectedOrder?.publicOrderCode || orderId;
+      alert(`Callback initiated for Order #${displayOrder}`);
     } catch (error) {
       actions.setError("Failed to initiate callback");
     } finally {
@@ -339,11 +359,13 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
       }
 
       if (shouldCallCustomer && reason) {
+        const displayOrder = selectedOrder?.publicOrderCode || orderId;
         alert(
-          `Order #${orderId} cancelled. Customer will be called with reason: ${reason}`
+          `Order #${displayOrder} cancelled. Customer will be called with reason: ${reason}`
         );
       } else {
-        alert(`Order #${orderId} cancelled without customer notification.`);
+        const displayOrder = selectedOrder?.publicOrderCode || orderId;
+        alert(`Order #${displayOrder} cancelled without customer notification.`);
       }
     } catch (error) {
       actions.setError("Failed to cancel order");
@@ -430,7 +452,7 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                     </div>
                     <div>
                       <h3 className="text-sm font-medium text-white">
-                        Order #{order.id}
+                        Order #{order.publicOrderCode || order.id}
                       </h3>
                       <div className="flex items-center space-x-2 mt-1">
                         <Badge

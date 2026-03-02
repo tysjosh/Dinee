@@ -111,7 +111,7 @@ export async function GET(
     }
     
     // Get the order
-    const order = await convexClient.query(api.orders.getOrderByOrderId, {
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
     });
     

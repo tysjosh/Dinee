@@ -1,0 +1,390 @@
+# Implementation Plan
+
+- [ ] 1. Write bug condition exploration tests
+  - **Property 1: Fault Condition** — Platform Defects C1–C13
+  - **CRITICAL**: These tests MUST FAIL on unfixed code — failure confirms the bugs exist
+  - **DO NOT attempt to fix the tests or the code when they fail**
+  - **NOTE**: These tests encode the expected behavior — they will validate the fixes when they pass after implementation
+  - **GOAL**: Surface counterexamples that demonstrate each bug exists
+  - **Scoped PBT Approach**: Each sub-test targets a specific fault condition with concrete failing cases
+  - [x] 1.1 Type compilation exploration test (C1)
+    - Run `npx tsc --noEmit` and assert 0 type errors across files importing from `@/lib/partner-api/types`
+    - **EXPECTED OUTCOME**: Test FAILS — compiler produces errors for missing/misnamed type exports (`ApiKey` vs `APIKey`, missing `ApiErrorResponse`, `ApiSuccessResponse`, `ApiKeyValidationResult`, `RateLimitHeaders`, etc.)
+    - Document counterexamples: list all type errors found
+    - _Requirements: 1.1, 1.2_
+  - [x] 1.2 Fail-open internal auth exploration test (C2, C3)
+    - Write test: set `NODE_ENV=production` with no `INTERNAL_API_KEY`, send POST to an internal-use route (e.g., `/api/v1/upsert-order`)
+    - Assert the response is HTTP 500 (misconfiguration) — NOT 200
+    - Write test: verify ws-server wrapper functions include `x-api-key` header in fetch calls
+    - **EXPECTED OUTCOME**: Test FAILS — route returns 200 (fail-open), wrappers omit header
+    - _Requirements: 1.3, 1.4_
+  - [x] 1.3 Order ID collision exploration test (C4, C5)
+    - **Property-based**: Generate 1000 order IDs via `generateOrderId()`, assert no duplicates
+    - With 4-digit numeric (10,000 keyspace), birthday paradox predicts collisions within ~100 calls
+    - Also verify `upsertOrders` index lookup uses both `orderId` AND `restaurantId` fields
+    - **EXPECTED OUTCOME**: Test FAILS — collisions found, index lookup only uses `orderId`
+    - _Requirements: 1.5, 1.6_
+  - [x] 1.4 Full-table scan exploration test (C6, C7)
+    - Inspect `getOrderByOrderId`, `updatePaymentStatus`, `recordCODPaymentCollection`, `recordCODPaymentFailure`, `updateOrderStatus`, `updateDeliveryStatus` for `.collect()` followed by `.find()` pattern
+    - Inspect `updateCallASRData` for `.filter()` without `.withIndex()`
+    - **EXPECTED OUTCOME**: Test FAILS — all 7 functions use full-table scan patterns
+    - _Requirements: 1.7, 1.8_
+  - [x] 1.5 Cross-tenant access exploration test (C8)
+    - Authenticate as Partner A (authorized for restaurant R001), request orders for restaurant R002
+    - Assert response is HTTP 403
+    - **EXPECTED OUTCOME**: Test FAILS — returns 200 with R002's data (no tenant check)
+    - _Requirements: 1.9_
+  - [x] 1.6 Webhook race condition exploration test (C13)
+    - Send two identical webhook events concurrently to Paystack handler
+    - Assert only one processes the payment (exactly-once)
+    - **EXPECTED OUTCOME**: Test FAILS — both requests pass idempotency check and process payment
+    - _Requirements: 1.14_
+  - Run all tests on UNFIXED code
+  - **EXPECTED OUTCOME**: All tests FAIL (this is correct — it proves the bugs exist)
+  - Document all counterexamples found to understand root causes
+  - Mark task complete when tests are written, run, and failures are documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.14_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fixes)
+  - **Property 2: Preservation** — Existing Authenticated Flows Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - **IMPORTANT**: All tests below MUST PASS on unfixed code before any fixes are applied
+  - [x] 2.1 Partner API preservation test
+    - Observe: valid partner API calls with correct scopes and owned restaurants return expected response shapes and status codes on unfixed code
+    - Write property-based test: for all valid partner API requests with correct auth and owned resources, response shape and status codes match observed baseline
+    - _Requirements: 3.1_
+  - [x] 2.2 Internal auth preservation test
+    - Observe: requests with valid `x-api-key` matching `INTERNAL_API_KEY` succeed on unfixed code
+    - Observe: requests without key when `NODE_ENV=development` succeed on unfixed code
+    - Write property-based test: for all requests with valid key in production and no key in dev, behavior matches observed baseline
+    - _Requirements: 3.2, 3.3_
+  - [x] 2.3 Order query preservation test
+    - Observe: `getOrdersByRestaurant`, `getActiveOrdersByRestaurant`, and other index-backed queries return correct results on unfixed code
+    - Write property-based test: for all restaurant-scoped order queries, results match observed baseline
+    - _Requirements: 3.4_
+  - [x] 2.4 Call query preservation test
+    - Observe: `getCallsByRestaurant`, `getCallsByBranch` return correct results on unfixed code
+    - Write property-based test: for all restaurant/branch-scoped call queries, results match observed baseline
+    - _Requirements: 3.5_
+  - [x] 2.5 Webhook preservation test
+    - Observe: valid, non-duplicate Paystack/Flutterwave webhooks with correct signatures process payments and return 200 on unfixed code
+    - Write property-based test: for all valid first-delivery webhooks, payment processing and response match observed baseline
+    - _Requirements: 3.6_
+  - [x] 2.6 Voice call flow preservation test
+    - Observe: normal call flow (restaurant verification → order building → completion) works on unfixed code
+    - Write property-based test: for all normal-phase-progression call flows, order creation, transcript saving, and call completion match observed baseline
+    - _Requirements: 3.7_
+  - [x] 2.7 Rate limit header preservation test
+    - Observe: requests within 1000/min limit receive `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers on unfixed code
+    - Write property-based test: for all requests within rate limit, header semantics match observed baseline
+    - _Requirements: 3.8_
+  - [x] 2.8 upsertCallData preservation test
+    - Observe: `upsertCallData` uses `by_call_and_order_id` index for lookups with same insert/update behavior on unfixed code
+    - Write test asserting index-backed lookup and insert/update behavior is preserved
+    - _Requirements: 3.9_
+  - [x] 2.9 createOrderWithPayment preservation test
+    - Observe: `createOrderWithPayment` with WhatsApp opt-in schedules confirmation messages and sets initial statuses on unfixed code
+    - Write test asserting scheduling and initial status behavior is preserved
+    - _Requirements: 3.10_
+  - Run all tests on UNFIXED code
+  - **EXPECTED OUTCOME**: All tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10_
+
+- [x] 3. Fix 1: Type System Normalization (P0)
+  - [x] 3.1 Rename exports in `src/lib/partner-api/types.ts` to match consumer convention
+    - `APIKey` → `ApiKey` (add `rateLimitOverride?: number` field)
+    - `APIKeyStatus` → `ApiKeyStatus`
+    - `APIScope` → `ApiKeyScope`
+    - `APIResponse<T>` → `ApiSuccessResponse<T>`
+    - `APIError` → `ApiErrorResponse`
+    - `APIUsageMetrics` → `ApiUsageMetrics`
+    - `AccessToken` → `OAuthAccessToken`
+    - `PartnerApplication` → `OAuthClient` (or alias)
+    - _Bug_Condition: C1 — importedTypeName NOT IN types.ts.exportedNames_
+    - _Expected_Behavior: npm run type-check produces 0 errors_
+    - _Requirements: 2.1_
+  - [x] 3.2 Add missing type exports to `types.ts`
+    - Add `ApiKeyValidationResult` interface
+    - Add `ApiRequestContext` interface
+    - Add `OAuthTokenRequest` interface
+    - Add `RateLimitHeaders` interface
+    - Reconcile `RateLimitConfig` and `RateLimitStatus` field names to match `rate-limiter.ts` usage
+    - Consolidate `DEFAULT_RATE_LIMIT` export between `types.ts` and `auth.ts`
+    - _Bug_Condition: C1 — referenced types not exported from module_
+    - _Expected_Behavior: All consumer imports resolve without errors_
+    - _Requirements: 2.1, 2.2_
+  - [x] 3.3 Update all consumer imports across `auth.ts`, `middleware.ts`, `rate-limiter.ts`, and partner route files
+    - Verify all imports from `@/lib/partner-api/types` resolve correctly
+    - Run `npx tsc --noEmit` and confirm 0 type errors
+    - _Requirements: 2.1, 2.2_
+  - [x] 3.4 Verify bug condition exploration test (1.1) now passes
+    - **Property 1: Expected Behavior** — Type System Compiles Clean
+    - **IMPORTANT**: Re-run the SAME test from task 1.1 — do NOT write a new test
+    - **EXPECTED OUTCOME**: Test PASSES (confirms type drift is fixed)
+    - _Requirements: 2.1, 2.2_
+  - [x] 3.5 Verify preservation tests still pass
+    - **Property 2: Preservation** — Partner API and internal auth flows unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 — do NOT write new tests
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.1, 3.2_
+
+- [x] 4. Fix 2: Internal Auth Hardening (P0)
+  - [x] 4.1 Create shared `src/lib/internal-auth.ts` utility
+    - Implement `validateInternalApiKey(request)` with fail-closed behavior
+    - Return `{ valid: false, error: "Server misconfiguration", statusCode: 500 }` when `INTERNAL_API_KEY` unset and `NODE_ENV !== "development"`
+    - Allow requests when `INTERNAL_API_KEY` unset and `NODE_ENV === "development"`
+    - Validate `x-api-key` header against `INTERNAL_API_KEY` when set
+    - _Bug_Condition: C2 — env.INTERNAL_API_KEY == undefined AND env.NODE_ENV != "development"_
+    - _Expected_Behavior: Returns 500 misconfiguration error, never allows unauthenticated access_
+    - _Requirements: 2.3_
+  - [x] 4.2 Update all 7 internal-use route handlers to use `validateInternalApiKey()`
+    - Replace inline `validateApiKey()` in each route under `src/app/client/api/v1/(internal-use)/*/route.ts`
+    - Import and call `validateInternalApiKey()` from `@/lib/internal-auth`
+    - _Requirements: 2.3_
+  - [x] 4.3 Update ws-server wrapper functions to include `x-api-key` header
+    - Add `"x-api-key": process.env.INTERNAL_API_KEY || ""` to all fetch headers in `src/app/ws-server/tools.ts`
+    - Apply to: `wrapperUpsertCallData`, `wrapperAddTranscriptDialogues`, `wrapperUpsertOrders`, `wrapperGetRestaurantDetails`, `wrapperMatchUpsellPrompts`, `wrapperRecordPromptAcceptance`, `wrapperCheckBlocked`
+    - _Bug_Condition: C3 — ws_server_internal_fetch headers["x-api-key"] == undefined_
+    - _Expected_Behavior: All ws-server fetch calls include x-api-key header_
+    - _Requirements: 2.4_
+  - [x] 4.4 Verify bug condition exploration test (1.2) now passes
+    - **Property 1: Expected Behavior** — Internal Auth Fails Closed
+    - **IMPORTANT**: Re-run the SAME test from task 1.2 — do NOT write a new test
+    - **EXPECTED OUTCOME**: Test PASSES (confirms fail-closed auth and header inclusion)
+    - _Requirements: 2.3, 2.4_
+  - [x] 4.5 Verify preservation tests still pass
+    - **Property 2: Preservation** — Internal auth with valid key and dev mode unchanged
+    - Re-run tests from task 2.2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.2, 3.3_
+
+- [x] 5. Fix 3: Split Order ID Design (P0)
+  - [x] 5.1 Implement new ID generation functions in `src/app/ws-server/tools.ts`
+    - Add `generateOrderId()` returning `ord_${nanoid(16)}` (high-entropy internal ID)
+    - Add `generatePublicOrderCode()` returning 6-char uppercase alphanumeric (no ambiguous chars I/O/0/1)
+    - Install `nanoid` dependency if not present
+    - _Bug_Condition: C4 — keyspace(generator) <= 10000_
+    - _Expected_Behavior: orderId has 16+ chars entropy, publicOrderCode is 6-char alphanumeric unique per restaurant_
+    - _Requirements: 2.5_
+  - [x] 5.2 Update `convex/schema.ts` — add `publicOrderCode` field and index
+    - Add `publicOrderCode: v.optional(v.string())` to orders table (optional for backward compat)
+    - Add index `.index("by_public_order_code_and_restaurant", ["publicOrderCode", "restaurantId"])`
+    - _Requirements: 2.5_
+  - [x] 5.3 Update `convex/internal.ts` `upsertOrders` to accept and store `publicOrderCode`
+    - Add `publicOrderCode` to mutation args
+    - Store in order record on insert
+    - _Requirements: 2.5_
+  - [x] 5.4 Update `generate_order_id` tool in ws-server to return both `orderId` and `publicOrderCode`
+    - Voice agent reads back `publicOrderCode` to customer
+    - Internal APIs use `orderId` for all lookups
+    - _Requirements: 2.5_
+  - [x] 5.5 Update dashboard components to display `publicOrderCode` for customer-facing references
+    - Use `orderId` for internal API calls, `publicOrderCode` for display
+    - _Requirements: 2.5_
+  - [x] 5.6 Verify bug condition exploration test (1.3) now passes
+    - **Property 1: Expected Behavior** — Order ID Entropy and Separation
+    - Re-run the SAME test from task 1.3
+    - **EXPECTED OUTCOME**: Test PASSES (no collisions, dual-ID scheme works)
+    - _Requirements: 2.5, 2.6_
+  - [x] 5.7 Verify preservation tests still pass
+    - **Property 2: Preservation** — Order creation and query flows unchanged
+    - Re-run tests from tasks 2.3, 2.9
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.4, 3.10_
+
+- [x] 6. Fix 4: Index-Backed Query Migration (P0/P1)
+  - [x] 6.1 Add `by_order_id` index to orders table in `convex/schema.ts`
+    - `.index("by_order_id", ["orderId"])` for webhook handlers that only have orderId
+    - _Requirements: 2.7_
+  - [x] 6.2 Rewrite 6 functions in `convex/orders.ts` to use index-backed queries
+    - Replace `.collect().find()` with `.withIndex("by_order_and_restaurant_id", ...)` in:
+      - `getOrderByOrderId` — add `restaurantId` as required arg
+      - `updatePaymentStatus` — add `restaurantId` as required arg
+      - `recordCODPaymentCollection` — add `restaurantId` as required arg
+      - `recordCODPaymentFailure` — add `restaurantId` as required arg
+      - `updateOrderStatus` — add `restaurantId` as required arg
+      - `updateDeliveryStatus` — add `restaurantId` as required arg
+    - Use `.unique()` for single-record lookups
+    - _Bug_Condition: C6 — queryStrategy == "collect_then_find"_
+    - _Expected_Behavior: All single-record lookups use index, O(1) not O(N)_
+    - _Preservation: Restaurant-scoped queries (getOrdersByRestaurant, getActiveOrdersByRestaurant) remain unchanged_
+    - _Requirements: 2.7, 4.1, 4.2, 4.3_
+  - [x] 6.3 Fix `upsertOrders` in `convex/internal.ts` to scope index lookup by both fields
+    - Pass both `orderId` AND `restaurantId` to `by_order_and_restaurant_id` index
+    - _Bug_Condition: C5 — indexLookupFields == ["orderId"] only_
+    - _Expected_Behavior: Lookup uses both fields, no cross-restaurant collision_
+    - _Requirements: 2.6_
+  - [x] 6.4 Fix `updateCallASRData` in `convex/calls.ts` to use index
+    - Replace `.filter()` with `.withIndex("by_call_and_order_id", (q) => q.eq("callId", args.callId))`
+    - _Bug_Condition: C7 — queryStrategy == "filter_without_index"_
+    - _Expected_Behavior: Call lookup uses index, O(1) not O(N)_
+    - _Requirements: 2.8_
+  - [x] 6.5 Update all call sites to pass `restaurantId` to rewritten functions
+    - Update webhook handlers, partner routes, dashboard API calls
+    - _Requirements: 2.7_
+  - [x] 6.6 Verify bug condition exploration tests (1.4) now pass
+    - **Property 1: Expected Behavior** — Index-Backed Single-Record Lookups
+    - Re-run the SAME tests from task 1.4
+    - **EXPECTED OUTCOME**: Tests PASS (no full-table scans)
+    - _Requirements: 2.7, 2.8_
+  - [x] 6.7 Verify preservation tests still pass
+    - **Property 2: Preservation** — Order and call query results unchanged
+    - Re-run tests from tasks 2.3, 2.4, 2.8
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.4, 3.5, 3.9_
+
+- [-] 7. Fix 5: `authorizeResourceAccess()` Utility (P1)
+  - [-] 7.1 Create `src/lib/partner-api/authorization.ts`
+    - Implement `authorizeResourceAccess(convexClient, partnerId, resourceType, resourceId)`
+    - Support resource types: `restaurant`, `order`, `call`, `menu`, `branch`
+    - For `restaurant`: check `partner.restaurantIds.includes(resourceId)`
+    - For sub-resources: resolve parent `restaurantId` then check ownership
+    - Return `{ authorized: true }` or `{ authorized: false, error: string }`
+    - _Bug_Condition: C8 — NOT tenantOwnershipVerified(partnerId, resourceId)_
+    - _Expected_Behavior: Returns 403 when partner doesn't own the resource_
+    - _Requirements: 2.9_
+  - [~] 7.2 Update all partner route handlers to call `authorizeResourceAccess()` before read/write
+    - Add authorization check in: `branches`, `calls`, `menus`, `orders`, `restaurants`, `webhooks` routes
+    - Return 403 Forbidden with error message if authorization fails
+    - _Requirements: 2.9_
+  - [~] 7.3 Verify bug condition exploration test (1.5) now passes
+    - **Property 1: Expected Behavior** — Tenant Authorization Enforcement
+    - Re-run the SAME test from task 1.5
+    - **EXPECTED OUTCOME**: Test PASSES (cross-tenant access returns 403)
+    - _Requirements: 2.9_
+  - [~] 7.4 Verify preservation tests still pass
+    - **Property 2: Preservation** — Valid partner API calls unchanged
+    - Re-run tests from task 2.1
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.1_
+
+- [ ] 8. Fix 6: Persistent Callback Context Store (P2)
+  - [~] 8.1 Add `callbackSessions` table to `convex/schema.ts`
+    - Fields: `sessionId`, `phoneNumber`, `reason`, `data`, `isCallback`, `createdAt`, `expiresAt`, `consumed`
+    - Indexes: `by_session_id`, `by_expires_at`
+    - _Requirements: 2.10_
+  - [~] 8.2 Create `convex/callbackSessions.ts` with mutations
+    - `createSession(sessionId, phoneNumber, reason, data)` — inserts with `expiresAt = Date.now() + 300_000`
+    - `getAndConsumeSession(sessionId)` — reads by index, sets `consumed = true`, returns context
+    - `cleanupExpiredSessions()` — scheduled job to delete expired rows
+    - _Requirements: 2.10_
+  - [~] 8.3 Update `/callback` route in ws-server
+    - Generate `callbackSessionId = crypto.randomUUID()`
+    - Store context via Convex mutation instead of `pendingCallbacks.set()`
+    - Pass `callbackSessionId` in Twilio Stream URL query param
+    - _Bug_Condition: C9 — storageType == "in_memory_map"_
+    - _Expected_Behavior: Context persists across restarts, keyed by UUID not phone number_
+    - _Requirements: 2.10_
+  - [~] 8.4 Update `/media-stream-callback` route to read context from Convex by `sessionId`
+    - Replace `pendingCallbacks.get(phoneNumber)` with Convex query by `sessionId`
+    - _Requirements: 2.10_
+  - [~] 8.5 Remove `pendingCallbacks` Map from ws-server
+    - Delete the in-memory Map and all references
+    - _Requirements: 2.10_
+  - [~] 8.6 Verify preservation tests still pass
+    - **Property 2: Preservation** — Voice call flow unchanged
+    - Re-run tests from task 2.6
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.7_
+
+- [ ] 9. Fix 7: Distributed Rate Limiter (P2)
+  - [~] 9.1 Install dependencies and add env vars
+    - Install `@upstash/ratelimit` and `@upstash/redis`
+    - Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to env config
+    - _Requirements: 2.11_
+  - [~] 9.2 Rewrite `src/lib/partner-api/rate-limiter.ts` with Upstash sliding window
+    - Replace `InMemoryRateLimiter` with `Ratelimit` from `@upstash/ratelimit`
+    - Configure sliding window: 1000 requests per 60 seconds
+    - Maintain same public API: `checkRateLimit`, `recordAndCheckRateLimit`, `getRateLimitHeaders`, `createRateLimitResponse`
+    - Return same `RateLimitStatus` shape with `currentCount`, `maxRequests`, `resetInSeconds`, `isLimited`
+    - _Bug_Condition: C10 — limiterType == "in_memory" AND serverInstanceCount > 1_
+    - _Expected_Behavior: Accurate rate limiting across all server instances_
+    - _Requirements: 2.11_
+  - [~] 9.3 Implement fallback to in-memory limiter for local dev
+    - If `UPSTASH_REDIS_REST_URL` is not set, fall back to `InMemoryRateLimiter` with console warning
+    - _Requirements: 2.11_
+  - [~] 9.4 Verify preservation tests still pass
+    - **Property 2: Preservation** — Rate limit headers unchanged
+    - Re-run tests from task 2.7
+    - **EXPECTED OUTCOME**: Tests PASS (confirms header semantics preserved)
+    - _Requirements: 3.8_
+
+- [ ] 10. Fix 8: Voice Agent State Machine (P3)
+  - [~] 10.1 Create `src/app/ws-server/call-phase.ts`
+    - Define `CallPhase` type: `await_restaurant_id` → `restaurant_verified` → `order_open` → `order_finalized`
+    - Define `ALLOWED_TOOLS` mapping per phase
+    - Implement `isToolAllowed(phase, toolName)` — returns boolean
+    - Implement `nextPhase(current, event)` — returns next phase or current if no valid transition
+    - _Bug_Condition: C11 — NOT phaseAllows(currentPhase, toolName)_
+    - _Expected_Behavior: Tool calls outside allowed phase are rejected with structured error, no side effects_
+    - _Requirements: 2.12_
+  - [~] 10.2 Add phase tracking to WebSocket connections in `src/app/ws-server/index.ts`
+    - Initialize `let callPhase: CallPhase = "await_restaurant_id"` per connection
+    - _Requirements: 2.12_
+  - [~] 10.3 Gate tool execution in `response.function_call_arguments.done` handler
+    - Check `isToolAllowed(callPhase, toolName)` before executing any tool
+    - If not allowed: log structured error (callId, phase, tool, timestamp), return error output, produce no side effects
+    - If allowed: execute tool, then advance phase via `nextPhase()` on success
+    - Phase transitions: `get_restaurant_details` success → `restaurant_verified`, `generate_order_id` success → `order_open`, `upsert_order` with completed status → `order_finalized`
+    - _Requirements: 2.12_
+  - [~] 10.4 Verify preservation tests still pass
+    - **Property 2: Preservation** — Normal voice call flow unchanged
+    - Re-run tests from task 2.6
+    - **EXPECTED OUTCOME**: Tests PASS (normal phase progression still works)
+    - _Requirements: 3.7_
+
+- [ ] 11. Fix 9: Structured Logging + Webhook Idempotency (P3)
+  - [~] 11.1 Create `src/lib/logger.ts`
+    - Implement `createLogger(module)` returning `{ info, warn, error, debug }` methods
+    - Each method accepts `(message, context?)` where context includes `callId`, `requestId`, `orderId`, `partnerId`
+    - Output structured JSON with `level`, `module`, `message`, `timestamp`, and all context fields
+    - _Bug_Condition: C12 — correlationId == undefined_
+    - _Expected_Behavior: All log entries are structured JSON with correlation IDs_
+    - _Requirements: 2.13_
+  - [~] 11.2 Replace `console.log`/`console.error` in internal-use routes with structured logger
+    - Import `createLogger` in each internal-use route handler
+    - Pass `requestId` as correlation ID
+    - _Requirements: 2.13_
+  - [~] 11.3 Replace `console.log`/`console.error` in ws-server handlers with structured logger
+    - Import `createLogger` in ws-server `index.ts` and `tools.ts`
+    - Pass `callId` as correlation ID
+    - _Requirements: 2.13_
+  - [~] 11.4 Replace `console.log`/`console.error` in webhook routes with structured logger
+    - Import `createLogger` in Paystack and Flutterwave route handlers
+    - Pass `eventId` and `orderId` as correlation IDs
+    - _Requirements: 2.13_
+  - [~] 11.5 Implement atomic webhook idempotency in `convex/webhookEvents.ts`
+    - Create `atomicInsertWebhookEvent` mutation that checks-and-inserts in a single Convex transaction
+    - Query `by_event_id` index, return `{ inserted: false }` if exists, otherwise insert and return `{ inserted: true, id }`
+    - Convex mutations are serialized per document, eliminating TOCTOU race
+    - _Bug_Condition: C13 — NOT atomicIdempotencyGuard(eventId)_
+    - _Expected_Behavior: Duplicate webhook events return 200 with no side effects, exactly-once processing_
+    - _Requirements: 2.14_
+  - [~] 11.6 Update Paystack webhook handler to use atomic idempotency
+    - Call `atomicInsertWebhookEvent` first in `src/app/client/api/v1/webhooks/paystack/route.ts`
+    - If `inserted === false`, return `NextResponse.json({ status: "already_processed" }, { status: 200 })`
+    - Only proceed with payment processing if `inserted === true`
+    - _Requirements: 2.14_
+  - [~] 11.7 Update Flutterwave webhook handler to use atomic idempotency
+    - Same pattern as 11.6 in `src/app/client/api/v1/webhooks/flutterwave/route.ts`
+    - _Requirements: 2.14_
+  - [~] 11.8 Verify bug condition exploration test (1.6) now passes
+    - **Property 1: Expected Behavior** — Atomic Webhook Idempotency
+    - Re-run the SAME test from task 1.6
+    - **EXPECTED OUTCOME**: Test PASSES (duplicate webhooks are deduplicated)
+    - _Requirements: 2.14_
+  - [~] 11.9 Verify preservation tests still pass
+    - **Property 2: Preservation** — Valid webhooks and call flows unchanged
+    - Re-run tests from tasks 2.5, 2.6
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - _Requirements: 3.6, 3.7_
+
+- [ ] 12. Checkpoint — Ensure all tests pass
+  - Re-run ALL exploration tests (task 1) — all should now PASS
+  - Re-run ALL preservation tests (task 2) — all should still PASS
+  - Run `npx tsc --noEmit` — 0 type errors
+  - Run full test suite
+  - Ensure no regressions across all 9 fixes
+  - Ask the user if questions arise
+  - _Requirements: 2.1–2.14, 3.1–3.10, 4.1–4.3_

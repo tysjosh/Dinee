@@ -185,7 +185,7 @@ const PastOrders: React.FC<PastOrdersProps> = ({ className }) => {
                     </div>
                     <div>
                       <h3 className="text-sm font-medium text-white">
-                        Order #{order.id}
+                        Order #{order.publicOrderCode || order.id}
                       </h3>
                       <div className="flex items-center space-x-2 mt-1">
                         <Badge

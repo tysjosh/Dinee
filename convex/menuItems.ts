@@ -78,6 +78,16 @@ export const getMenuItems = query({
       .collect();
   },
 });
+// Get a single menu item by its Convex document ID
+// Used by authorization utility to resolve menuItem → restaurantId
+export const getMenuItemById = query({
+  args: { id: v.id("menuItems") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+
 
 // Get menu items for a specific branch
 export const getMenuItemsByBranch = query({

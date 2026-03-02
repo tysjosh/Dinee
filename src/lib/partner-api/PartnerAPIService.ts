@@ -383,7 +383,7 @@ export class PartnerAPIService {
       createdAt: Date.now(),
     };
 
-    this.accessTokens.set(token.id, token);
+    this.accessTokens.set(token.id!, token);
 
     return {
       accessToken: tokenValue,
@@ -400,8 +400,8 @@ export class PartnerAPIService {
     for (const accessToken of this.accessTokens.values()) {
       if (accessToken.tokenHash === tokenHash) {
         // Check expiration
-        if (accessToken.expiresAt < Date.now()) {
-          this.accessTokens.delete(accessToken.id);
+        if (accessToken.expiresAt && accessToken.expiresAt < Date.now()) {
+          this.accessTokens.delete(accessToken.id!);
           return null;
         }
         
@@ -527,6 +527,10 @@ export class PartnerAPIService {
       : entry.windowStart + windowMs;
 
     return {
+      currentCount: entry.requests.length,
+      maxRequests,
+      resetInSeconds: Math.max(0, Math.ceil((resetAt - now) / 1000)),
+      isLimited: remaining === 0,
       remaining,
       limit: maxRequests,
       resetAt: Math.floor(resetAt / 1000),

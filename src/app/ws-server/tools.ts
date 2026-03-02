@@ -1,4 +1,4 @@
-import otpGenerator from "otp-generator";
+import { nanoid } from "nanoid";
 
 const NEXT_APP_URL = process.env.NEXT_APP_URL || "http://localhost:3000";
 
@@ -40,7 +40,11 @@ export async function wrapperGetRestaurantDetails(restaurantId: string): Promise
   if (!restaurantId) {
     return { success: false, error: "Restaurant ID is required" };
   }
-  const response = await fetch(`${NEXT_APP_URL}/api/v1/get-restaurant-data/${restaurantId}`);
+  const response = await fetch(`${NEXT_APP_URL}/api/v1/get-restaurant-data/${restaurantId}`, {
+    headers: {
+      "x-api-key": process.env.INTERNAL_API_KEY || ""
+    }
+  });
   const data = await response.json();
   return data;
 }
@@ -52,7 +56,8 @@ export async function wrapperUpsertCallData(callData: CallData): Promise<unknown
   const response = await fetch(`${NEXT_APP_URL}/api/v1/upsert-call`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-api-key": process.env.INTERNAL_API_KEY || ""
     },
     body: JSON.stringify(callData)
   });
@@ -67,7 +72,8 @@ export async function wrapperAddTranscriptDialogues(dialogueData: TranscriptData
   const response = await fetch(`${NEXT_APP_URL}/api/v1/add-transcript-dialogue`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-api-key": process.env.INTERNAL_API_KEY || ""
     },
     body: JSON.stringify(dialogueData)
   });
@@ -82,7 +88,8 @@ export async function wrapperUpsertOrders(orderData: OrderData): Promise<unknown
   const response = await fetch(`${NEXT_APP_URL}/api/v1/upsert-order`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-api-key": process.env.INTERNAL_API_KEY || ""
     },
     body: JSON.stringify(orderData)
   });
@@ -91,10 +98,24 @@ export async function wrapperUpsertOrders(orderData: OrderData): Promise<unknown
 }
 
 /**
- * Generates a 4-digit numeric order ID
+ * Generates a high-entropy internal order ID using nanoid
  */
 export function generateOrderId(): string {
-  return otpGenerator.generate(4, { upperCaseAlphabets: false, specialChars: false, lowerCaseAlphabets: false });
+  return `ord_${nanoid(16)}`;
+}
+
+const PUBLIC_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
+
+/**
+ * Generates a 6-char uppercase alphanumeric public order code
+ * for customer-facing references (voice readback, dashboard display)
+ */
+export function generatePublicOrderCode(): string {
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += PUBLIC_CODE_CHARS[Math.floor(Math.random() * PUBLIC_CODE_CHARS.length)];
+  }
+  return code;
 }
 
 // ============================================================================
@@ -188,7 +209,8 @@ export async function wrapperMatchUpsellPrompts(
     const response = await fetch(`${NEXT_APP_URL}/api/v1/match-prompts`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-api-key": process.env.INTERNAL_API_KEY || ""
       },
       body: JSON.stringify(requestBody)
     });
@@ -225,7 +247,8 @@ export async function wrapperRecordPromptAcceptance(
     const response = await fetch(`${NEXT_APP_URL}/api/v1/record-prompt-acceptance`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-api-key": process.env.INTERNAL_API_KEY || ""
       },
       body: JSON.stringify({ deliveryId, accepted })
     });
@@ -323,7 +346,8 @@ export async function wrapperCheckBlocked(
     const response = await fetch(`${NEXT_APP_URL}/api/v1/check-blocked`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-api-key": process.env.INTERNAL_API_KEY || ""
       },
       body: JSON.stringify({ phoneNumber })
     });

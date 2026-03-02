@@ -18,6 +18,7 @@ import {
   wrapperAddTranscriptDialogues,
   wrapperUpsertOrders,
   generateOrderId,
+  generatePublicOrderCode,
   wrapperCheckBlocked,
   generateBlockedCallTwiML,
 } from "./tools.ts";
@@ -278,7 +279,7 @@ fastify.register(async (fastify) => {
               {
                 type: "function",
                 name: "generate_order_id",
-                description: "Generate a 4-digit numeric order ID",
+                description: "Generate a unique order ID. Returns an internal orderId for API lookups and a publicOrderCode (6-char alphanumeric) to read back to the customer as their order reference.",
                 parameters: { type: "object", properties: {}, required: [] }
               },
             ],
@@ -472,7 +473,7 @@ fastify.register(async (fastify) => {
               }) as Record<string, unknown>;
               break;
             case "generate_order_id":
-              output = { order_id: generateOrderId() };
+              output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
               break;
           }
         } catch (e) {
@@ -865,7 +866,7 @@ fastify.register(async (fastify) => {
               }) as Record<string, unknown>;
               break;
             case "generate_order_id":
-              output = { order_id: generateOrderId() };
+              output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
               break;
           }
         } catch (e) {

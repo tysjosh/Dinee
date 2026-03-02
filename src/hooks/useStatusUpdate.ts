@@ -41,6 +41,7 @@ export interface StatusUpdateOptions {
  */
 export interface OrderStatusUpdateOptions {
   orderId: string;
+  restaurantId: string;
   status: "active" | "preparing" | "ready" | "completed" | "cancelled";
   restaurantName?: string;
   riderName?: string;
@@ -70,6 +71,7 @@ export interface UseStatusUpdateReturn {
   updateOrderStatus: (options: OrderStatusUpdateOptions) => Promise<void>;
   /** Update delivery status and send message */
   updateDeliveryStatus: (options: Omit<StatusUpdateOptions, "status"> & { 
+    restaurantId: string;
     deliveryStatus: "pending" | "assigned" | "dispatched" | "in_transit" | "delivered" | "failed";
     riderId?: string;
     deliveryFailureReason?: string;
@@ -166,6 +168,7 @@ export function useStatusUpdate(): UseStatusUpdateReturn {
       try {
         await updateOrderStatusMutation({
           orderId: options.orderId,
+          restaurantId: options.restaurantId,
           status: options.status,
           cancellationReason: options.cancellationReason,
           riderName: options.riderName,
@@ -190,6 +193,7 @@ export function useStatusUpdate(): UseStatusUpdateReturn {
    */
   const updateDeliveryStatus = useCallback(
     async (options: Omit<StatusUpdateOptions, "status"> & { 
+      restaurantId: string;
       deliveryStatus: "pending" | "assigned" | "dispatched" | "in_transit" | "delivered" | "failed";
       riderId?: string;
       deliveryFailureReason?: string;
@@ -200,6 +204,7 @@ export function useStatusUpdate(): UseStatusUpdateReturn {
       try {
         await updateDeliveryStatusMutation({
           orderId: options.orderId,
+          restaurantId: options.restaurantId,
           deliveryStatus: options.deliveryStatus,
           riderId: options.riderId,
           riderName: options.riderName,

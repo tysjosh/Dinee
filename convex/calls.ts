@@ -15,10 +15,10 @@ export const updateCallASRData = mutation({
     fallbackTriggered: v.boolean(),
   },
   handler: async (ctx, args) => {
-    // Find the call by callId string
+    // Find the call by callId using index (O(1) instead of full-table scan)
     const call = await ctx.db
       .query("calls")
-      .filter((q) => q.eq(q.field("callId"), args.callId))
+      .withIndex("by_call_and_order_id", (q) => q.eq("callId", args.callId))
       .first();
 
     if (!call) {
@@ -43,6 +43,22 @@ export const updateCallASRData = mutation({
     return call._id;
   },
 });
+/**
+ * Get a single call by callId
+ * Used by authorization utility to resolve call → restaurantId
+ */
+export const getCallByCallId = query({
+  args: { callId: v.string() },
+  handler: async (ctx, args) => {
+    const call = await ctx.db
+      .query("calls")
+      .withIndex("by_call_and_order_id", (q) => q.eq("callId", args.callId))
+      .first();
+    return call ?? null;
+  },
+});
+
+
 
 
 export const getCallsByRestaurant = query({

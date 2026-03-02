@@ -271,8 +271,15 @@ async function handlePaymentSuccess(
   console.log(`Paystack webhook: Processing payment success for order ${orderId}`);
 
   try {
+    // Look up order to get restaurantId
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
     await convexClient.mutation(api.orders.updatePaymentStatus, {
       orderId,
+      restaurantId: order.restaurantId,
       paymentStatus: "paid",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),
@@ -299,8 +306,15 @@ async function handlePaymentFailure(
   console.log(`Paystack webhook: Processing payment failure for order ${orderId}`);
 
   try {
+    // Look up order to get restaurantId
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
     await convexClient.mutation(api.orders.updatePaymentStatus, {
       orderId,
+      restaurantId: order.restaurantId,
       paymentStatus: "failed",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),
@@ -334,8 +348,15 @@ async function handleRefund(
   console.log(`Paystack webhook: Processing refund for order ${orderId}`);
 
   try {
+    // Look up order to get restaurantId
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
     await convexClient.mutation(api.orders.updatePaymentStatus, {
       orderId,
+      restaurantId: order.restaurantId,
       paymentStatus: "refunded",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),

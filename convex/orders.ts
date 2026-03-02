@@ -4,23 +4,36 @@ import { internal } from "./_generated/api";
 
 // Get an order by orderId
 export const getOrderByOrderId = query({
-  args: { orderId: v.string() },
+  args: { orderId: v.string(), restaurantId: v.string() },
   handler: async (ctx, args) => {
-    // Query using the index - note: this index requires both orderId and restaurantId
-    // We'll collect all orders and filter by orderId
-    const orders = await ctx.db
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     return order || null;
   },
 });
+// Look up an order by orderId only (without restaurantId)
+// Used by webhook handlers, rider API, and messaging routes that only have orderId
+export const getOrderByOrderIdOnly = query({
+  args: { orderId: v.string() },
+  handler: async (ctx, args) => {
+    const order = await ctx.db
+      .query("orders")
+      .withIndex("by_order_id", (q) => q.eq("orderId", args.orderId))
+      .unique();
+    return order || null;
+  },
+});
+
 
 // Update payment status for an order
 export const updatePaymentStatus = mutation({
   args: {
     orderId: v.string(),
+    restaurantId: v.string(),
     paymentStatus: v.union(
       v.literal("pending"),
       v.literal("paid"),
@@ -31,12 +44,13 @@ export const updatePaymentStatus = mutation({
     paymentTimestamp: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Find the order by orderId
-    const orders = await ctx.db
+    // Find the order by orderId using index
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     
     if (!order) {
       throw new Error(`Order not found: ${args.orderId}`);
@@ -530,16 +544,18 @@ export const getCODOrdersByBranch = query({
 export const recordCODPaymentCollection = mutation({
   args: {
     orderId: v.string(),
+    restaurantId: v.string(),
     collectedBy: v.string(),
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    // Find the order by orderId
-    const orders = await ctx.db
+    // Find the order by orderId using index
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     
     if (!order) {
       throw new Error(`Order not found: ${args.orderId}`);
@@ -566,15 +582,17 @@ export const recordCODPaymentCollection = mutation({
 export const recordCODPaymentFailure = mutation({
   args: {
     orderId: v.string(),
+    restaurantId: v.string(),
     failureReason: v.string(),
   },
   handler: async (ctx, args) => {
-    // Find the order by orderId
-    const orders = await ctx.db
+    // Find the order by orderId using index
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     
     if (!order) {
       throw new Error(`Order not found: ${args.orderId}`);
@@ -673,6 +691,7 @@ export const getCODReconciliationSummary = query({
 export const updateOrderStatus = mutation({
   args: {
     orderId: v.string(),
+    restaurantId: v.string(),
     status: v.union(
       v.literal("active"),
       v.literal("preparing"),
@@ -688,12 +707,13 @@ export const updateOrderStatus = mutation({
     estimatedDeliveryMinutes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Find the order by orderId
-    const orders = await ctx.db
+    // Find the order by orderId using index
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     
     if (!order) {
       throw new Error(`Order not found: ${args.orderId}`);
@@ -765,6 +785,7 @@ export const updateOrderStatus = mutation({
 export const updateDeliveryStatus = mutation({
   args: {
     orderId: v.string(),
+    restaurantId: v.string(),
     deliveryStatus: v.union(
       v.literal("pending"),
       v.literal("assigned"),
@@ -781,12 +802,13 @@ export const updateDeliveryStatus = mutation({
     estimatedDeliveryMinutes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Find the order by orderId
-    const orders = await ctx.db
+    // Find the order by orderId using index
+    const order = await ctx.db
       .query("orders")
-      .collect();
-    
-    const order = orders.find(o => o.orderId === args.orderId);
+      .withIndex("by_order_and_restaurant_id", (q) =>
+        q.eq("orderId", args.orderId).eq("restaurantId", args.restaurantId)
+      )
+      .unique();
     
     if (!order) {
       throw new Error(`Order not found: ${args.orderId}`);

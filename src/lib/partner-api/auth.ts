@@ -264,7 +264,7 @@ export function processTokenRequest(
   }
   
   // Check grant type is allowed
-  if (!client.grantTypes.includes(request.grantType)) {
+  if (!client.grantTypes?.includes(request.grantType)) {
     return { success: false, error: 'Grant type not allowed for this client' };
   }
   
@@ -274,11 +274,11 @@ export function processTokenRequest(
       // Parse requested scopes
       const requestedScopes = request.scope 
         ? request.scope.split(' ') as ApiKeyScope[]
-        : client.scopes;
+        : client.scopes ?? [];
       
       // Validate scopes are allowed
       const validScopes = requestedScopes.filter(scope => 
-        client.scopes.includes(scope)
+        (client.scopes ?? []).includes(scope)
       );
       
       if (validScopes.length === 0) {
@@ -297,7 +297,7 @@ export function processTokenRequest(
       }
       
       // For now, issue a new token with the same scopes
-      const token = generateAccessToken(client, client.scopes);
+      const token = generateAccessToken(client, client.scopes ?? []);
       return { success: true, token };
     }
     

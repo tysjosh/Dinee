@@ -9,20 +9,8 @@
 
 import { api } from "../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
-import { NextRequest } from "next/server";
-
-// Simple API key validation for internal routes
-function validateApiKey(request: NextRequest): boolean {
-  const apiKey = request.headers.get("x-api-key");
-  const expectedKey = process.env.INTERNAL_API_KEY;
-  
-  // If no API key is configured, allow requests (development mode)
-  if (!expectedKey) {
-    return true;
-  }
-  
-  return apiKey === expectedKey;
-}
+import { NextRequest, NextResponse } from "next/server";
+import { validateInternalApiKey } from "@/lib/internal-auth";
 
 // ============================================================================
 // Types (inline to avoid module resolution issues)
@@ -170,15 +158,12 @@ interface CheckBlockedResponse {
  */
 export async function POST(request: NextRequest): Promise<Response> {
   // Validate API key for internal routes
-  if (!validateApiKey(request)) {
-    const response: CheckBlockedResponse = {
-      success: false,
-      error: "Unauthorized"
-    };
-    return new Response(JSON.stringify(response), {
-      status: 401,
-      headers: { "Content-Type": "application/json" }
-    });
+  const authResult = validateInternalApiKey(request);
+  if (!authResult.valid) {
+    return NextResponse.json(
+      { error: authResult.error },
+      { status: authResult.statusCode }
+    );
   }
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;

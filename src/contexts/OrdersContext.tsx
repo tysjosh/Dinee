@@ -218,6 +218,7 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
 
     return {
       id: order.orderId,
+      publicOrderCode: order.publicOrderCode,
       callId: order.callId,
       phoneNumber: associatedCall?.phoneNumber || order.customerPhone || "Unknown",
       customerName: order.customerName,

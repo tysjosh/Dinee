@@ -19,7 +19,7 @@
 /**
  * API key status
  */
-export type APIKeyStatus = 'active' | 'revoked' | 'expired';
+export type ApiKeyStatus = 'active' | 'revoked' | 'expired';
 
 /**
  * OAuth 2.0 grant types supported
@@ -30,7 +30,7 @@ export type OAuthGrantType = 'client_credentials' | 'authorization_code' | 'refr
  * API key record
  * @requirements 21.3 - API key management
  */
-export interface APIKey {
+export interface ApiKey {
   /** Unique key ID */
   id: string;
   /** Partner ID this key belongs to */
@@ -42,11 +42,13 @@ export interface APIKey {
   /** Human-readable name for the key */
   name: string;
   /** Key status */
-  status: APIKeyStatus;
+  status: ApiKeyStatus;
   /** Scopes/permissions granted to this key */
   scopes: string[];
   /** Rate limit override (requests per minute) */
   rateLimit?: number;
+  /** Rate limit override used by middleware/rate-limiter */
+  rateLimitOverride?: number;
   /** When the key was created */
   createdAt: number;
   /** When the key expires (optional) */
@@ -58,10 +60,10 @@ export interface APIKey {
 }
 
 /**
- * Partner application record
+ * Partner application record (OAuth client)
  * @requirements 21.2 - OAuth 2.0 authentication
  */
-export interface PartnerApplication {
+export interface OAuthClient {
   /** Unique partner ID */
   id: string;
   /** Partner name */
@@ -80,33 +82,55 @@ export interface PartnerApplication {
   webhookSecret?: string;
   /** Partner status */
   status: 'active' | 'suspended' | 'pending';
+  /** Whether the partner is active */
+  isActive?: boolean;
+  /** Allowed grant types */
+  grantTypes?: OAuthGrantType[];
+  /** Scopes available to this client */
+  scopes?: ApiKeyScope[];
   /** When the partner was created */
   createdAt: number;
   /** Contact email */
   contactEmail: string;
 }
 
+/** @deprecated Use OAuthClient instead */
+export type PartnerApplication = OAuthClient;
+
 /**
  * OAuth access token
+ * Supports both storage shape (id, tokenHash, scopes[], expiresAt) and
+ * response shape (accessToken, expiresIn, refreshToken, scope string)
  */
-export interface AccessToken {
-  /** Token ID */
-  id: string;
+export interface OAuthAccessToken {
+  /** Token ID (storage) */
+  id?: string;
   /** Partner ID */
-  partnerId: string;
+  partnerId?: string;
   /** API key ID (if key-based auth) */
   apiKeyId?: string;
   /** Token value (hashed in storage) */
-  tokenHash: string;
+  tokenHash?: string;
+  /** Plain access token value (response) */
+  accessToken?: string;
   /** Token type */
   tokenType: 'Bearer';
-  /** Scopes granted */
-  scopes: string[];
-  /** When the token expires */
-  expiresAt: number;
+  /** Scopes granted (storage — array) */
+  scopes?: string[];
+  /** Scopes granted (response — space-delimited string) */
+  scope?: string;
+  /** When the token expires (storage — timestamp) */
+  expiresAt?: number;
+  /** Token lifetime in seconds (response) */
+  expiresIn?: number;
+  /** Refresh token (response) */
+  refreshToken?: string;
   /** When the token was created */
-  createdAt: number;
+  createdAt?: number;
 }
+
+/** @deprecated Use OAuthAccessToken instead */
+export type AccessToken = OAuthAccessToken;
 
 // ============================================================================
 // Rate Limiting Types
@@ -121,22 +145,40 @@ export interface RateLimitConfig {
   maxRequests: number;
   /** Window size in seconds */
   windowSeconds: number;
-  /** Whether to use sliding window */
-  slidingWindow: boolean;
+  /** Whether to use sliding window (optional, for PartnerAPIService compat) */
+  slidingWindow?: boolean;
 }
 
 /**
  * Rate limit status for a client
+ * Field names match rate-limiter.ts internal usage
  */
 export interface RateLimitStatus {
-  /** Number of requests remaining */
-  remaining: number;
-  /** Total limit */
-  limit: number;
-  /** When the window resets (Unix timestamp) */
-  resetAt: number;
-  /** Whether the limit is exceeded */
-  exceeded: boolean;
+  /** Number of requests made in current window */
+  currentCount: number;
+  /** Maximum requests allowed per window */
+  maxRequests: number;
+  /** Seconds until the window resets */
+  resetInSeconds: number;
+  /** Whether the limit has been exceeded */
+  isLimited: boolean;
+  /** Remaining requests (PartnerAPIService compat) */
+  remaining?: number;
+  /** Request limit (PartnerAPIService compat) */
+  limit?: number;
+  /** Reset timestamp in seconds (PartnerAPIService compat) */
+  resetAt?: number;
+  /** Whether limit is exceeded (PartnerAPIService compat) */
+  exceeded?: boolean;
+}
+
+/**
+ * Rate limit headers for HTTP responses
+ */
+export interface RateLimitHeaders {
+  'X-RateLimit-Limit': string;
+  'X-RateLimit-Remaining': string;
+  'X-RateLimit-Reset': string;
 }
 
 /**
@@ -176,7 +218,43 @@ export type WebhookEventType =
 export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'failed' | 'retrying';
 
 /**
+ * Webhook subscription record
+ */
+export interface WebhookSubscription {
+  /** Subscription ID */
+  id: string;
+  /** Partner ID */
+  partnerId: string;
+  /** Delivery URL */
+  url: string;
+  /** Webhook secret for signature verification */
+  secret: string;
+  /** Event types subscribed to */
+  events: WebhookEventType[];
+  /** Whether the subscription is active */
+  isActive: boolean;
+  /** When the subscription was created */
+  createdAt: number;
+}
+
+/**
  * Webhook event payload
+ */
+export interface WebhookPayload<T = unknown> {
+  /** Unique event ID */
+  id: string;
+  /** Event type */
+  type: WebhookEventType;
+  /** When the event occurred */
+  timestamp: number;
+  /** API version */
+  apiVersion: string;
+  /** Event data */
+  data: T;
+}
+
+/**
+ * Webhook event record (stored)
  */
 export interface WebhookEvent {
   /** Unique event ID */
@@ -199,21 +277,37 @@ export interface WebhookDelivery {
   /** Delivery ID */
   id: string;
   /** Partner ID */
-  partnerId: string;
+  partnerId?: string;
+  /** Subscription ID (webhook-service compat) */
+  subscriptionId?: string;
   /** Event being delivered */
-  event: WebhookEvent;
+  event?: WebhookEvent;
+  /** Event type (webhook-service compat) */
+  eventType?: WebhookEventType;
+  /** Serialized payload (webhook-service compat) */
+  payload?: string;
   /** Delivery URL */
-  url: string;
+  url?: string;
   /** Delivery status */
-  status: WebhookDeliveryStatus;
+  status?: WebhookDeliveryStatus;
   /** Number of attempts made */
-  attempts: number;
+  attempts?: number;
+  /** Attempt count (webhook-service compat) */
+  attemptCount?: number;
   /** Maximum attempts allowed */
-  maxAttempts: number;
+  maxAttempts?: number;
   /** HTTP status code of last attempt */
   lastStatusCode?: number;
+  /** HTTP status code (webhook-service compat) */
+  statusCode?: number;
+  /** Response body (webhook-service compat) */
+  responseBody?: string;
   /** Error message of last attempt */
   lastError?: string;
+  /** Error message (webhook-service compat) */
+  error?: string;
+  /** Whether delivery succeeded (webhook-service compat) */
+  success?: boolean;
   /** When the delivery was created */
   createdAt: number;
   /** When the last attempt was made */
@@ -232,9 +326,11 @@ export interface WebhookDelivery {
  * Standard API error response
  * @requirements 21.4 - Proper error responses
  */
-export interface APIError {
+export interface ApiErrorResponse {
+  /** Error indicator (e.g. "Unauthorized", "Internal Server Error") */
+  error?: string;
   /** Error code */
-  code: string;
+  code?: string;
   /** Human-readable error message */
   message: string;
   /** Additional error details */
@@ -242,6 +338,9 @@ export interface APIError {
   /** Request ID for tracing */
   requestId?: string;
 }
+
+/** @deprecated Use ApiErrorResponse instead */
+export type APIError = ApiErrorResponse;
 
 /**
  * Paginated response wrapper
@@ -265,9 +364,9 @@ export interface PaginatedResponse<T> {
 }
 
 /**
- * API response wrapper
+ * API success response wrapper
  */
-export interface APIResponse<T> {
+export interface ApiSuccessResponse<T> {
   /** Response data */
   data: T;
   /** Response metadata */
@@ -281,6 +380,9 @@ export interface APIResponse<T> {
   };
 }
 
+/** @deprecated Use ApiSuccessResponse instead */
+export type APIResponse<T> = ApiSuccessResponse<T>;
+
 // ============================================================================
 // API Usage Types
 // ============================================================================
@@ -289,7 +391,7 @@ export interface APIResponse<T> {
  * API usage metrics
  * @requirements 21.7 - Display API usage metrics
  */
-export interface APIUsageMetrics {
+export interface ApiUsageMetrics {
   /** Partner ID */
   partnerId: string;
   /** Time period */
@@ -312,6 +414,9 @@ export interface APIUsageMetrics {
   /** Average response time in ms */
   averageResponseTimeMs: number;
 }
+
+/** @deprecated Use ApiUsageMetrics instead */
+export type APIUsageMetrics = ApiUsageMetrics;
 
 /**
  * Webhook delivery metrics
@@ -339,6 +444,43 @@ export interface WebhookMetrics {
 }
 
 // ============================================================================
+// Additional Types (referenced by consumers)
+// ============================================================================
+
+/**
+ * Result of API key validation
+ */
+export interface ApiKeyValidationResult {
+  valid: boolean;
+  apiKey?: ApiKey;
+  error?: string;
+  errorCode?: string;
+}
+
+/**
+ * Context for an API request
+ */
+export interface ApiRequestContext {
+  requestId: string;
+  apiKey: ApiKey;
+  partnerId: string;
+  clientIp?: string;
+  ipAddress?: string;
+  timestamp: number;
+}
+
+/**
+ * OAuth token request parameters
+ */
+export interface OAuthTokenRequest {
+  grantType: OAuthGrantType;
+  clientId: string;
+  clientSecret: string;
+  scope?: string;
+  refreshToken?: string;
+}
+
+// ============================================================================
 // Constants
 // ============================================================================
 
@@ -349,7 +491,6 @@ export interface WebhookMetrics {
 export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   maxRequests: 1000,
   windowSeconds: 60,
-  slidingWindow: true,
 };
 
 /**
@@ -386,4 +527,17 @@ export const API_SCOPES = [
   'webhooks:manage',
 ] as const;
 
-export type APIScope = typeof API_SCOPES[number];
+export type ApiKeyScope = typeof API_SCOPES[number];
+
+// ============================================================================
+// Deprecated Aliases (backward compatibility)
+// ============================================================================
+
+/** @deprecated Use ApiKey instead */
+export type APIKey = ApiKey;
+
+/** @deprecated Use ApiKeyStatus instead */
+export type APIKeyStatus = ApiKeyStatus;
+
+/** @deprecated Use ApiKeyScope instead */
+export type APIScope = ApiKeyScope;

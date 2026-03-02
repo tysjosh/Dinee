@@ -156,6 +156,7 @@ export const upsertOrders = mutation({
   args: {
     data: v.object({
       orderId: v.string(),
+      publicOrderCode: v.optional(v.string()),
       restaurantId: v.string(),
       callId: v.optional(v.string()), // callSid from Twilio
       customerName: v.string(),
@@ -185,7 +186,7 @@ export const upsertOrders = mutation({
       console.log(args.data)
       // checks for the existing order id
       const orderResponse = await ctx.db.query("orders")
-        .withIndex("by_order_and_restaurant_id", (q) => q.eq("orderId", orderId))
+        .withIndex("by_order_and_restaurant_id", (q) => q.eq("orderId", orderId).eq("restaurantId", args.data.restaurantId))
         .unique()
 
       if (!orderResponse) {

@@ -278,7 +278,7 @@ function DeliveryRow({
   delivery: WebhookDelivery;
   onRetry?: (deliveryId: string) => void;
 }) {
-  const config = DELIVERY_STATUS_CONFIG[delivery.status];
+  const config = DELIVERY_STATUS_CONFIG[delivery.status ?? 'pending'];
   const StatusIcon = config.icon;
 
   return (
@@ -289,7 +289,7 @@ function DeliveryRow({
         </div>
         <div>
           <p className="text-sm font-medium text-white">
-            {delivery.event.type}
+            {delivery.event?.type ?? 'unknown'}
           </p>
           <p className="text-xs text-white/40">
             {new Date(delivery.createdAt).toLocaleString()}

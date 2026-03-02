@@ -183,13 +183,13 @@ export class WebhookService {
       return true;
     }
 
-    if (delivery.attempts >= delivery.maxAttempts) {
+    if ((delivery.attempts ?? 0) >= (delivery.maxAttempts ?? 0)) {
       delivery.status = 'failed';
       await this.updateDelivery(delivery);
       return false;
     }
 
-    delivery.attempts++;
+    delivery.attempts = (delivery.attempts ?? 0) + 1;
     delivery.lastAttemptAt = Date.now();
     delivery.status = 'retrying';
 
@@ -198,9 +198,9 @@ export class WebhookService {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-Webhook-ID': delivery.id,
-        'X-Event-Type': delivery.event.type,
-        'X-Event-ID': delivery.event.id,
-        'X-Timestamp': delivery.event.timestamp.toString(),
+        'X-Event-Type': delivery.event?.type ?? '',
+        'X-Event-ID': delivery.event?.id ?? '',
+        'X-Timestamp': (delivery.event?.timestamp ?? 0).toString(),
       };
 
       // Add signature if secret is provided
@@ -214,7 +214,7 @@ export class WebhookService {
         this.config.requestTimeoutMs
       );
 
-      const response = await fetch(delivery.url, {
+      const response = await fetch(delivery.url!, {
         method: 'POST',
         headers,
         body: payload,
@@ -241,8 +241,8 @@ export class WebhookService {
     }
 
     // Schedule retry if attempts remaining
-    if (delivery.attempts < delivery.maxAttempts && this.config.autoRetry) {
-      const delay = getRetryDelay(delivery.attempts);
+    if ((delivery.attempts ?? 0) < (delivery.maxAttempts ?? 0) && this.config.autoRetry) {
+      const delay = getRetryDelay(delivery.attempts ?? 0);
       delivery.nextRetryAt = Date.now() + delay;
       delivery.status = 'retrying';
 
@@ -252,7 +252,7 @@ export class WebhookService {
       }, delay);
 
       this.pendingRetries.set(deliveryId, timeoutId);
-    } else if (delivery.attempts >= delivery.maxAttempts) {
+    } else if ((delivery.attempts ?? 0) >= (delivery.maxAttempts ?? 0)) {
       delivery.status = 'failed';
     }
 
@@ -384,7 +384,9 @@ export class WebhookService {
     let deliveredCount = 0;
 
     for (const delivery of deliveries) {
-      byEventType[delivery.event.type] = (byEventType[delivery.event.type] || 0) + 1;
+      if (delivery.event) {
+        byEventType[delivery.event.type] = (byEventType[delivery.event.type] || 0) + 1;
+      }
       
       if (delivery.status === 'delivered' && delivery.completedAt) {
         totalDeliveryTime += delivery.completedAt - delivery.createdAt;
