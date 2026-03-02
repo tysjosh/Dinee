@@ -16,6 +16,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { FlutterwaveProvider } from "@/lib/payment/FlutterwaveProvider";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("webhook-flutterwave");
 
 // ============================================================================
 // Types
@@ -68,7 +71,7 @@ function generateEventId(payload: FlutterwaveWebhookPayload): string {
 function getConvexClient(): ConvexHttpClient | null {
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
-    console.error("NEXT_PUBLIC_CONVEX_URL environment variable is not set");
+    logger.error("NEXT_PUBLIC_CONVEX_URL environment variable is not set");
     return null;
   }
   return new ConvexHttpClient(convexUrl);
@@ -80,7 +83,7 @@ function getConvexClient(): ConvexHttpClient | null {
 function getFlutterwaveProvider(): FlutterwaveProvider | null {
   const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
   if (!secretKey) {
-    console.error("FLUTTERWAVE_SECRET_KEY environment variable is not set");
+    logger.error("FLUTTERWAVE_SECRET_KEY environment variable is not set");
     return null;
   }
   return new FlutterwaveProvider({ secretKey });
@@ -141,7 +144,7 @@ export async function POST(request: NextRequest) {
     rawBody = await request.text();
     payload = JSON.parse(rawBody);
   } catch {
-    console.error("Flutterwave webhook: Invalid JSON body");
+    logger.error("Flutterwave webhook: Invalid JSON body");
     return NextResponse.json(
       { error: "Invalid JSON body" },
       { status: 400 }
@@ -150,7 +153,7 @@ export async function POST(request: NextRequest) {
 
   // Validate payload structure
   if (!isValidWebhookPayload(payload)) {
-    console.error("Flutterwave webhook: Invalid payload structure");
+    logger.error("Flutterwave webhook: Invalid payload structure");
     return NextResponse.json(
       { error: "Invalid payload structure" },
       { status: 400 }
@@ -163,7 +166,7 @@ export async function POST(request: NextRequest) {
   // Initialize Flutterwave provider for verification
   const flutterwaveProvider = getFlutterwaveProvider();
   if (!flutterwaveProvider) {
-    console.error("Flutterwave webhook: Failed to initialize Flutterwave provider");
+    logger.error("Flutterwave webhook: Failed to initialize Flutterwave provider");
     return NextResponse.json(
       { error: "Server configuration error" },
       { status: 500 }
@@ -173,7 +176,7 @@ export async function POST(request: NextRequest) {
   // Initialize Convex client
   const convexClient = getConvexClient();
   if (!convexClient) {
-    console.error("Flutterwave webhook: Failed to initialize Convex client");
+    logger.error("Flutterwave webhook: Failed to initialize Convex client");
     return NextResponse.json(
       { error: "Server configuration error" },
       { status: 500 }
@@ -190,39 +193,32 @@ export async function POST(request: NextRequest) {
   if (webhookSecret) {
     signatureValid = flutterwaveProvider.verifyWebhookSignature(verifHash);
     if (!signatureValid) {
-      console.warn(`Flutterwave webhook: Invalid verif-hash signature for event ${eventId}`);
+      logger.warn(`Flutterwave webhook: Invalid verif-hash signature for event ${eventId}`, { eventId });
     }
   }
 
-  // Log the webhook event (even if signature is invalid, for audit purposes)
+  // Atomic idempotency check — insert-first strategy eliminates TOCTOU race
   try {
-    // Check if event was already processed (idempotency check)
-    const existingEvent = await convexClient.query(
-      api.webhookEvents.getWebhookEventByEventId,
-      { eventId }
+    const insertResult = await convexClient.mutation(
+      api.webhookEvents.atomicInsertWebhookEvent,
+      {
+        eventId,
+        provider: "flutterwave",
+        eventType: payload.event,
+        payload: rawBody,
+        signature: verifHash || undefined,
+        verified: false, // Will be updated after verification endpoint check
+        processed: false,
+        orderId: payload.data.meta?.orderId,
+      }
     );
 
-    if (existingEvent?.processed) {
-      console.log(`Flutterwave webhook: Event ${eventId} already processed, skipping`);
-      return NextResponse.json(
-        { message: "Event already processed" },
-        { status: 200 }
-      );
+    if (!insertResult.inserted) {
+      logger.info(`Flutterwave webhook: Event ${eventId} already processed, skipping`, { eventId });
+      return NextResponse.json({ status: "already_processed" }, { status: 200 });
     }
-
-    // Log the webhook event (initially unverified, will update after verification)
-    await convexClient.mutation(api.webhookEvents.createWebhookEvent, {
-      eventId,
-      provider: "flutterwave",
-      eventType: payload.event,
-      payload: rawBody,
-      signature: verifHash || undefined,
-      verified: false, // Will be updated after verification endpoint check
-      processed: false,
-      orderId: payload.data.meta?.orderId,
-    });
   } catch (error) {
-    console.error("Flutterwave webhook: Failed to log webhook event:", error);
+    logger.error("Flutterwave webhook: Failed to log webhook event", { eventId });
     // Continue processing even if logging fails
   }
 
@@ -248,7 +244,7 @@ export async function POST(request: NextRequest) {
       verified: verificationResult.success || verificationResult.status !== "failed",
     });
   } catch (error) {
-    console.error(`Flutterwave webhook: Verification failed for transaction ${transactionId}:`, error);
+    logger.error(`Flutterwave webhook: Verification failed for transaction ${transactionId}`, { eventId });
     return NextResponse.json(
       { error: "Webhook verification failed" },
       { status: 422 }
@@ -260,7 +256,7 @@ export async function POST(request: NextRequest) {
   if (!verificationResult.success && metadata?.error && 
       typeof metadata.error === "string" && 
       metadata.error.includes("Verification failed")) {
-    console.warn(`Flutterwave webhook: Transaction verification failed for ${transactionId}`);
+    logger.warn(`Flutterwave webhook: Transaction verification failed for ${transactionId}`, { eventId });
     return NextResponse.json(
       { error: "Transaction verification failed" },
       { status: 422 }
@@ -271,14 +267,14 @@ export async function POST(request: NextRequest) {
   const orderId = payload.data.meta?.orderId;
   
   if (!orderId) {
-    console.warn(`Flutterwave webhook: No orderId in metadata for event ${eventId}`);
+    logger.warn(`Flutterwave webhook: No orderId in metadata for event ${eventId}`, { eventId });
     // Mark as processed since we can't do anything without an order ID
     try {
       await convexClient.mutation(api.webhookEvents.markWebhookEventAsProcessed, {
         eventId,
       });
     } catch (error) {
-      console.error("Flutterwave webhook: Failed to mark event as processed:", error);
+      logger.error("Flutterwave webhook: Failed to mark event as processed", { eventId });
     }
     return NextResponse.json(
       { message: "Webhook received but no orderId in metadata" },
@@ -314,7 +310,7 @@ export async function POST(request: NextRequest) {
         } else if (paymentStatus === "failed") {
           await handlePaymentFailure(convexClient, orderId, payload);
         } else {
-          console.log(`Flutterwave webhook: Unhandled event type: ${payload.event} with status: ${paymentStatus}`);
+          logger.info(`Flutterwave webhook: Unhandled event type: ${payload.event} with status: ${paymentStatus}`, { eventId, orderId });
         }
     }
 
@@ -329,7 +325,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error(`Flutterwave webhook: Error processing event ${eventId}:`, error);
+    logger.error(`Flutterwave webhook: Error processing event ${eventId}`, { eventId, orderId });
     return NextResponse.json(
       { error: "Failed to process webhook" },
       { status: 500 }
@@ -352,7 +348,7 @@ async function handlePaymentSuccess(
   orderId: string,
   payload: FlutterwaveWebhookPayload
 ): Promise<void> {
-  console.log(`Flutterwave webhook: Processing payment success for order ${orderId}`);
+  logger.info(`Flutterwave webhook: Processing payment success for order ${orderId}`, { orderId });
 
   try {
     // Look up order to get restaurantId
@@ -369,9 +365,9 @@ async function handlePaymentSuccess(
       paymentTimestamp: Date.now(),
     });
 
-    console.log(`Flutterwave webhook: Order ${orderId} payment status updated to "paid"`);
+    logger.info(`Flutterwave webhook: Order ${orderId} payment status updated to "paid"`, { orderId });
   } catch (error) {
-    console.error(`Flutterwave webhook: Failed to update payment status for order ${orderId}:`, error);
+    logger.error(`Flutterwave webhook: Failed to update payment status for order ${orderId}`, { orderId });
     throw error;
   }
 }
@@ -387,7 +383,7 @@ async function handlePaymentFailure(
   orderId: string,
   payload: FlutterwaveWebhookPayload
 ): Promise<void> {
-  console.log(`Flutterwave webhook: Processing payment failure for order ${orderId}`);
+  logger.info(`Flutterwave webhook: Processing payment failure for order ${orderId}`, { orderId });
 
   try {
     // Look up order to get restaurantId
@@ -404,7 +400,7 @@ async function handlePaymentFailure(
       paymentTimestamp: Date.now(),
     });
 
-    console.log(`Flutterwave webhook: Order ${orderId} payment status updated to "failed"`);
+    logger.info(`Flutterwave webhook: Order ${orderId} payment status updated to "failed"`, { orderId });
 
     // TODO: Implement branch notification
     // This could be done via:
@@ -413,9 +409,9 @@ async function handlePaymentFailure(
     // 3. Email notification
     // For now, the real-time update through Convex will notify the branch dashboard
     
-    console.log(`Flutterwave webhook: Branch notification pending for order ${orderId} payment failure`);
+    logger.info(`Flutterwave webhook: Branch notification pending for order ${orderId} payment failure`, { orderId });
   } catch (error) {
-    console.error(`Flutterwave webhook: Failed to update payment status for order ${orderId}:`, error);
+    logger.error(`Flutterwave webhook: Failed to update payment status for order ${orderId}`, { orderId });
     throw error;
   }
 }

@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import fastifyFormBody from "@fastify/formbody";
 import fastifyWs from "@fastify/websocket";
 import cors from "@fastify/cors"
+import crypto from "crypto";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../convex/_generated/api.js";
 import {
   CANCELLATION_SYSTEM_PROMPT,
   FOLLOWUP_SYSTEM_PROMPT,
@@ -22,15 +25,22 @@ import {
   wrapperCheckBlocked,
   generateBlockedCallTwiML,
 } from "./tools.ts";
+import { CallPhase, isToolAllowed, nextPhase } from "./call-phase.ts";
 import twilio from "twilio";
+import { createLogger } from "../../lib/logger.ts";
+
+const logger = createLogger("ws-server");
 
 dotenv.config({ path: ".env.local" });
 const PORT = (process.env.NEXT_BACKEND_PORT || 8000) as number | undefined;
 const { NEXT_OPENAI_KEY } = process.env;
 if (!NEXT_OPENAI_KEY) {
-  console.error("Missing OpenAI API key.");
+  logger.error("Missing OpenAI API key.");
   process.exit(1);
 }
+
+// Convex client for persistent callback session storage
+const convexClient = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 // Type definitions for connection-scoped state
 interface CallbackContext {
@@ -39,9 +49,6 @@ interface CallbackContext {
   isCallback?: boolean;
   data?: string;
 }
-
-// Store for pending callback contexts (keyed by phone number to handle race conditions)
-const pendingCallbacks = new Map<string, CallbackContext>();
 
 const fastify = Fastify({ logger: true });
 fastify.register(fastifyFormBody);
@@ -74,7 +81,7 @@ fastify.all("/incoming-call", async (request: any, reply) => {
         
         if (action === 'block') {
           // Immediately reject calls from blocked numbers
-          console.log(`🚫 Blocking call from ${fromNumber}: ${reason}`);
+          logger.info(`Blocking call from ${fromNumber}: ${reason}`, { callId: callSid });
           const twiml = generateBlockedCallTwiML();
           return reply.type("text/xml").send(twiml);
         }
@@ -82,7 +89,7 @@ fastify.all("/incoming-call", async (request: any, reply) => {
         if (action === 'require_verification') {
           // Log the verification requirement - the call will proceed but with a flag
           // In a production system, this could transfer to a human agent
-          console.log(`⚠️ Call from ${fromNumber} requires verification: ${reason}`);
+          logger.warn(`Call from ${fromNumber} requires verification: ${reason}`, { callId: callSid });
           // For now, we allow the call to proceed but log the warning
           // A more sophisticated implementation could:
           // 1. Transfer to a human agent
@@ -92,7 +99,7 @@ fastify.all("/incoming-call", async (request: any, reply) => {
       }
     } catch (error) {
       // If blocking check fails, allow the call to proceed (fail-open)
-      console.error("Error checking blocked status:", error);
+      logger.error("Error checking blocked status", { callId: callSid });
     }
   }
   
@@ -121,22 +128,23 @@ fastify.all("/callback", async (request: any, reply) => {
       return reply.status(400).send({ error: "Phone number is required" });
     }
 
-    // Store callback context keyed by phone number
-    const callbackContext: CallbackContext = {
-      reason: Array.isArray(reason) ? reason[0] : reason,
+    // Generate a unique session ID for this callback
+    const callbackSessionId = crypto.randomUUID();
+
+    // Store callback context in Convex (persistent, survives restarts)
+    await convexClient.mutation(api.callbackSessions.createSession, {
+      sessionId: callbackSessionId,
       phoneNumber,
+      reason: Array.isArray(reason) ? reason[0] : reason,
       data: typeof data === "string" ? data : JSON.stringify(data),
-      isCallback: true
-    };
-    
-    pendingCallbacks.set(phoneNumber, callbackContext);
+    });
 
     const client = twilio(process.env.NEXT_TWILIO_SID, process.env.NEXT_TWILIO_AUTH_TOKEN);
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Pause length="1"/>
       <Connect>
-      <Stream url="wss://${request.headers.host}/media-stream-callback?phone=${encodeURIComponent(phoneNumber)}" />
+      <Stream url="wss://${request.headers.host}/media-stream-callback?sessionId=${encodeURIComponent(callbackSessionId)}" />
       </Connect>
     </Response>`;
     
@@ -172,6 +180,9 @@ fastify.register(async (fastify) => {
     // Transcription state
     let restaurantIdConfirmed = false;
     let currentRestaurantId: string | null = null;
+
+    // Call phase state machine
+    let callPhase: CallPhase = "await_restaurant_id";
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -309,12 +320,13 @@ fastify.register(async (fastify) => {
 
     // Helper function to handle interruptions
     const handleSpeechStartedEvent = () => {
-      console.log("Speech started - handling interruption");
+      logger.info("Speech started - handling interruption", { callId: callSid });
       if (markQueue.length > 0 && responseStartTimestampTwilio != null) {
         const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
         if (SHOW_TIMING_MATH)
-          console.log(
-            `Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`
+          logger.debug(
+            `Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`,
+            { callId: callSid }
           );
 
         if (lastAssistantItem) {
@@ -325,9 +337,9 @@ fastify.register(async (fastify) => {
             audio_end_ms: elapsedTime,
           };
           if (SHOW_TIMING_MATH)
-            console.log(
-              "Sending truncation event:",
-              JSON.stringify(truncateEvent)
+            logger.debug(
+              `Sending truncation event: ${JSON.stringify(truncateEvent)}`,
+              { callId: callSid }
             );
           oaWs.send(JSON.stringify(truncateEvent));
         }
@@ -367,7 +379,7 @@ fastify.register(async (fastify) => {
             callId: callSid
           });
         } catch (error) {
-          console.error("Error saving transcript:", error);
+          logger.error("Error saving transcript", { callId: callSid });
         }
       }
     };
@@ -380,7 +392,7 @@ fastify.register(async (fastify) => {
         switch (message.event) {
           case 'media':
             latestMediaTimestamp = message.media.timestamp;
-            if (SHOW_TIMING_MATH) console.log(`Received media message with timestamp: ${latestMediaTimestamp}ms`);
+            if (SHOW_TIMING_MATH) logger.debug(`Received media message with timestamp: ${latestMediaTimestamp}ms`, { callId: callSid });
 
             if (oaWs.readyState === WebSocket.OPEN) {
               const audioAppend = {
@@ -393,7 +405,7 @@ fastify.register(async (fastify) => {
 
           case 'start':
             streamSid = message.start.streamSid;
-            console.log('Incoming stream has started', streamSid);
+            logger.info("Incoming stream has started", { callId: callSid });
             // Reset start and media timestamp on a new stream
             responseStartTimestampTwilio = null;
             latestMediaTimestamp = 0;
@@ -406,18 +418,18 @@ fastify.register(async (fastify) => {
             break;
 
           case 'stop':
-            console.log('Stream stopped');
+            logger.info("Stream stopped", { callId: callSid });
             if (oaWs.readyState === WebSocket.OPEN) {
               oaWs.close();
             }
             break;
 
           default:
-            console.log('Received non-media event:', message.event);
+            logger.info(`Received non-media event: ${message.event}`, { callId: callSid });
             break;
         }
       } catch (error) {
-        console.error("Error processing Twilio message:", error);
+        logger.error("Error processing Twilio message", { callId: callSid });
       }
     });
 
@@ -425,12 +437,12 @@ fastify.register(async (fastify) => {
     oaWs.on("message", async (raw) => {
       const res = JSON.parse(raw.toString());
 
-      if (LOG_EVENT_TYPES.includes(res.type)) console.log(res);
+      if (LOG_EVENT_TYPES.includes(res.type)) logger.debug("OpenAI event", { callId: callSid });
 
       // Handle real-time transcription events for human input
       if (res.type === "conversation.item.input_audio_transcription.delta") {
-        console.log("🎤 Human speaking (delta):", res);
-        console.log("🎤 Human speaking (delta):", res.delta);
+        logger.debug("Human speaking (delta)", { callId: callSid });
+        logger.debug(`Human speaking (delta): ${res.delta}`, { callId: callSid });
         // You can use delta for real-time display if needed
       }
 
@@ -442,42 +454,54 @@ fastify.register(async (fastify) => {
       // Function call from the model
       if (res.type === "response.function_call_arguments.done") {
         const args = JSON.parse(res.arguments);
+        const toolName: string = res.name;
         let output: Record<string, unknown> = { success: false };
 
-        try {
-          switch (res.name) {
-            case "get_restaurant_details":
-              output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
-              // If restaurant details are successfully retrieved, mark as confirmed
-              if (output.success) {
-                restaurantIdConfirmed = true;
-                currentRestaurantId = args.restaurant_id;
-              }
-              break;
-            case "add_transcript_dialogue":
-              output = await wrapperAddTranscriptDialogues({
-                ...args,
-                callId: callSid
-              }) as Record<string, unknown>;
-              break;
-            case "upsert_order":
-              output = await wrapperUpsertOrders({
-                ...args,
-                callId: callSid,
-              }) as Record<string, unknown>;
-              break;
-            case "upsert_call_data":
-              output = await wrapperUpsertCallData({
-                ...args,
-                callId: callSid,
-              }) as Record<string, unknown>;
-              break;
-            case "generate_order_id":
-              output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
-              break;
+        if (!isToolAllowed(callPhase, toolName)) {
+          logger.error("Tool rejected", {
+            callId: callSid,
+          });
+          output = { success: false, error: `Tool ${toolName} not allowed in phase ${callPhase}` };
+        } else {
+          try {
+            switch (toolName) {
+              case "get_restaurant_details":
+                output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
+                if (output.success) {
+                  restaurantIdConfirmed = true;
+                  currentRestaurantId = args.restaurant_id;
+                  callPhase = nextPhase(callPhase, "restaurant_verified");
+                }
+                break;
+              case "add_transcript_dialogue":
+                output = await wrapperAddTranscriptDialogues({
+                  ...args,
+                  callId: callSid
+                }) as Record<string, unknown>;
+                break;
+              case "upsert_order":
+                output = await wrapperUpsertOrders({
+                  ...args,
+                  callId: callSid,
+                }) as Record<string, unknown>;
+                if (output.success && args.status === "completed") {
+                  callPhase = nextPhase(callPhase, "order_finalized");
+                }
+                break;
+              case "upsert_call_data":
+                output = await wrapperUpsertCallData({
+                  ...args,
+                  callId: callSid,
+                }) as Record<string, unknown>;
+                break;
+              case "generate_order_id":
+                output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
+                callPhase = nextPhase(callPhase, "order_id_generated");
+                break;
+            }
+          } catch (e) {
+            output = { success: false, error: String(e) };
           }
-        } catch (e) {
-          output = { success: false, error: String(e) };
         }
 
         oaWs.send(
@@ -507,7 +531,7 @@ fastify.register(async (fastify) => {
         // First delta from a new response starts the elapsed time counter
         if (!responseStartTimestampTwilio) {
           responseStartTimestampTwilio = latestMediaTimestamp;
-          if (SHOW_TIMING_MATH) console.log(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`);
+          if (SHOW_TIMING_MATH) logger.debug(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`, { callId: callSid });
         }
 
         if (res.item_id) {
@@ -568,31 +592,32 @@ fastify.register(async (fastify) => {
       });
     });
     oaWs.on("error", (err) => {
-      console.error("OpenAI socket error:", err);
+      logger.error("OpenAI socket error", { callId: callSid });
     });
 
     // Twilio socket lifecycle
     connection.on("close", () => {
-      console.log("📵 Twilio socket closed");
+      logger.info("Twilio socket closed", { callId: callSid });
       // Shuts down the openAI socket
       if (oaWs.readyState === WebSocket.OPEN) oaWs.close();
     });
 
     connection.on("error", err => {
-      console.error("😵 Twilio socket error:", err);
+      logger.error("Twilio socket error", { callId: callSid });
     });
   });
 
 
   // Callback route
-  fastify.get("/media-stream-callback", { websocket: true }, (connection, req) => {
-    // Extract phone number from query params to get callback context
+  fastify.get("/media-stream-callback", { websocket: true }, async (connection, req) => {
+    // Extract sessionId from query params to get callback context from Convex
     const url = new URL(req.url || "", `http://${req.headers.host}`);
-    const phoneNumber = url.searchParams.get("phone") || "";
+    const sessionId = url.searchParams.get("sessionId") || "";
     
-    // Get and remove callback context for this phone number
-    const callbackContext = pendingCallbacks.get(phoneNumber) || {};
-    pendingCallbacks.delete(phoneNumber);
+    // Get and consume callback session from Convex (atomic, persistent)
+    const callbackContext = sessionId 
+      ? await convexClient.mutation(api.callbackSessions.getAndConsumeSession, { sessionId })
+      : null;
     
     // Connection-specific state
     let streamSid: string | null = null;
@@ -600,6 +625,13 @@ fastify.register(async (fastify) => {
     let lastAssistantItem: string | null = null;
     let markQueue: string[] = [];
     let responseStartTimestampTwilio: number | null = null;
+
+    // Call phase state machine — initial phase depends on callback reason
+    let callPhase: CallPhase = callbackContext?.reason === "followup"
+      ? "restaurant_verified"
+      : callbackContext?.reason === "cancellation"
+        ? "order_open"
+        : "await_restaurant_id";
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -615,7 +647,7 @@ fastify.register(async (fastify) => {
     let agentTools: Array<Record<string, unknown>> = [];
     let systemPrompt = "";
     
-    if (callbackContext.reason === "followup") {
+    if (callbackContext?.reason === "followup") {
       // Assign the tools here
       agentTools = [
         // Get restaurant details tool
@@ -699,7 +731,7 @@ fastify.register(async (fastify) => {
         // },
       ]
       systemPrompt = FOLLOWUP_SYSTEM_PROMPT;
-    } else if (callbackContext.reason === "cancellation") {
+    } else if (callbackContext?.reason === "cancellation") {
       systemPrompt = CANCELLATION_SYSTEM_PROMPT;
     }
     const initializeSession = () => {
@@ -730,7 +762,7 @@ fastify.register(async (fastify) => {
             content: [
               {
                 type: "input_text",
-                text: `Greet the caller. The details of the order and the reason for the call is: <data>${callbackContext.data || ""}</data><reason>${callbackContext.reason || ""}</reason>`,
+                text: `Greet the caller. The details of the order and the reason for the call is: <data>${callbackContext?.data || ""}</data><reason>${callbackContext?.reason || ""}</reason>`,
               },
             ],
           },
@@ -741,12 +773,13 @@ fastify.register(async (fastify) => {
 
     // Helper function to handle interruptions
     const handleSpeechStartedEvent = () => {
-      console.log("Speech started - handling interruption");
+      logger.info("Speech started - handling interruption", { callId: sessionId });
       if (markQueue.length > 0 && responseStartTimestampTwilio != null) {
         const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
         if (SHOW_TIMING_MATH)
-          console.log(
-            `Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`
+          logger.debug(
+            `Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`,
+            { callId: sessionId }
           );
 
         if (lastAssistantItem) {
@@ -757,9 +790,9 @@ fastify.register(async (fastify) => {
             audio_end_ms: elapsedTime,
           };
           if (SHOW_TIMING_MATH)
-            console.log(
-              "Sending truncation event:",
-              JSON.stringify(truncateEvent)
+            logger.debug(
+              `Sending truncation event: ${JSON.stringify(truncateEvent)}`,
+              { callId: sessionId }
             );
           oaWs.send(JSON.stringify(truncateEvent));
         }
@@ -798,7 +831,7 @@ fastify.register(async (fastify) => {
         switch (message.event) {
           case 'media':
             latestMediaTimestamp = message.media.timestamp;
-            if (SHOW_TIMING_MATH) console.log(`Received media message with timestamp: ${latestMediaTimestamp}ms`);
+            if (SHOW_TIMING_MATH) logger.debug(`Received media message with timestamp: ${latestMediaTimestamp}ms`, { callId: sessionId });
 
             if (oaWs.readyState === WebSocket.OPEN) {
               const audioAppend = {
@@ -811,7 +844,7 @@ fastify.register(async (fastify) => {
 
           case 'start':
             streamSid = message.start.streamSid;
-            console.log('Incoming stream has started', streamSid);
+            logger.info("Incoming stream has started", { callId: sessionId });
             // Reset start and media timestamp on a new stream
             responseStartTimestampTwilio = null;
             latestMediaTimestamp = 0;
@@ -824,18 +857,18 @@ fastify.register(async (fastify) => {
             break;
 
           case 'stop':
-            console.log('Stream stopped');
+            logger.info("Stream stopped", { callId: sessionId });
             if (oaWs.readyState === WebSocket.OPEN) {
               oaWs.close();
             }
             break;
 
           default:
-            console.log('Received non-media event:', message.event);
+            logger.info(`Received non-media event: ${message.event}`, { callId: sessionId });
             break;
         }
       } catch (error) {
-        console.error("Error processing Twilio message:", error);
+        logger.error("Error processing Twilio message", { callId: sessionId });
       }
     });
 
@@ -843,7 +876,7 @@ fastify.register(async (fastify) => {
     oaWs.on("message", async (raw) => {
       const res = JSON.parse(raw.toString());
 
-      if (LOG_EVENT_TYPES.includes(res.type)) console.log(res);
+      if (LOG_EVENT_TYPES.includes(res.type)) logger.debug("OpenAI event", { callId: sessionId });
 
       // Handle real-time transcription events for human input
       if (res.type === "conversation.item.input_audio_transcription.delta") {
@@ -853,24 +886,39 @@ fastify.register(async (fastify) => {
       // Function call from the model
       if (res.type === "response.function_call_arguments.done") {
         const args = JSON.parse(res.arguments);
+        const toolName: string = res.name;
         let output: Record<string, unknown> = { success: false };
 
-        try {
-          switch (res.name) {
-            case "get_restaurant_details":
-              output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
-              break;
-            case "upsert_order":
-              output = await wrapperUpsertOrders({
-                ...args,
-              }) as Record<string, unknown>;
-              break;
-            case "generate_order_id":
-              output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
-              break;
+        if (!isToolAllowed(callPhase, toolName)) {
+          logger.error("Tool rejected", {
+            callId: sessionId,
+          });
+          output = { success: false, error: `Tool ${toolName} not allowed in phase ${callPhase}` };
+        } else {
+          try {
+            switch (toolName) {
+              case "get_restaurant_details":
+                output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
+                if (output.success) {
+                  callPhase = nextPhase(callPhase, "restaurant_verified");
+                }
+                break;
+              case "upsert_order":
+                output = await wrapperUpsertOrders({
+                  ...args,
+                }) as Record<string, unknown>;
+                if (output.success && args.status === "completed") {
+                  callPhase = nextPhase(callPhase, "order_finalized");
+                }
+                break;
+              case "generate_order_id":
+                output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
+                callPhase = nextPhase(callPhase, "order_id_generated");
+                break;
+            }
+          } catch (e) {
+            output = { success: false, error: String(e) };
           }
-        } catch (e) {
-          output = { success: false, error: String(e) };
         }
 
         oaWs.send(
@@ -900,7 +948,7 @@ fastify.register(async (fastify) => {
         // First delta from a new response starts the elapsed time counter
         if (!responseStartTimestampTwilio) {
           responseStartTimestampTwilio = latestMediaTimestamp;
-          if (SHOW_TIMING_MATH) console.log(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`);
+          if (SHOW_TIMING_MATH) logger.debug(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`, { callId: sessionId });
         }
 
         if (res.item_id) {
@@ -927,7 +975,7 @@ fastify.register(async (fastify) => {
       // Callback completed
     });
     oaWs.on("error", (err) => {
-      console.error("OpenAI socket error:", err);
+      logger.error("OpenAI socket error", { callId: sessionId });
     });
 
     // Twilio socket lifecycle
@@ -937,15 +985,15 @@ fastify.register(async (fastify) => {
     });
 
     connection.on("error", (err) => {
-      console.error("Twilio socket error:", err);
+      logger.error("Twilio socket error", { callId: sessionId });
     });
   });
 });
 
 fastify.listen({ port: PORT, host: '0.0.0.0' }, (err, url) => {
   if (err) {
-    console.error(err);
+    logger.error("Server startup failed");
     process.exit(1);
   }
-  console.log(`Server running at ${url}`);
+  logger.info(`Server running at ${url}`);
 });

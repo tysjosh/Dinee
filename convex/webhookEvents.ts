@@ -49,6 +49,44 @@ export const createWebhookEvent = mutation({
 });
 
 /**
+ * Atomic webhook event insertion with idempotency check.
+ * Checks-and-inserts in a single Convex transaction (Convex mutations are
+ * serialized per document, eliminating TOCTOU race).
+ * Returns { inserted: false, alreadyProcessed } if the event already exists,
+ * or { inserted: true, id } on successful insert.
+ */
+export const atomicInsertWebhookEvent = mutation({
+  args: {
+    eventId: v.string(),
+    provider: providerValidator,
+    eventType: v.string(),
+    payload: v.string(),
+    signature: v.optional(v.string()),
+    verified: v.boolean(),
+    processed: v.boolean(),
+    orderId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // Check within the same transaction — atomic
+    const existing = await ctx.db
+      .query("webhookEvents")
+      .withIndex("by_event_id", (q) => q.eq("eventId", args.eventId))
+      .first();
+
+    if (existing) {
+      return { inserted: false as const, alreadyProcessed: existing.processed };
+    }
+
+    const id = await ctx.db.insert("webhookEvents", {
+      ...args,
+      createdAt: Date.now(),
+    });
+    return { inserted: true as const, id };
+  },
+});
+
+
+/**
  * Get a webhook event by its eventId
  * Used to check if a webhook has already been processed (idempotency)
  */

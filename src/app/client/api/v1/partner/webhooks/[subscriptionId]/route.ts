@@ -12,6 +12,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse, WebhookEventType } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -135,7 +136,7 @@ export async function GET(
     };
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(
@@ -296,7 +297,7 @@ export async function PATCH(
     };
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(
@@ -384,7 +385,7 @@ export async function DELETE(
     });
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

@@ -27,6 +27,10 @@ import {
 import type { ApiKey, ApiKeyScope, ApiRequestContext, ApiErrorResponse } from './types';
 import crypto from 'crypto';
 
+// Re-export authorizeResourceAccess so route handlers can import from middleware
+// Tenant authorization is enforced per-route after key+scope validation
+export { authorizeResourceAccess } from './authorization';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -264,7 +268,7 @@ export async function validateApiRequest(
   
   // Check rate limit
   if (!options.skipRateLimit) {
-    const rateLimitStatus = recordAndCheckRateLimit(apiKey);
+    const rateLimitStatus = await recordAndCheckRateLimit(apiKey);
     
     if (rateLimitStatus.isLimited) {
       return {
@@ -340,11 +344,11 @@ export function withApiAuth<T>(
  * @param apiKey - The API key for rate limit info
  * @returns Response with rate limit headers
  */
-export function addRateLimitHeaders<T>(
+export async function addRateLimitHeaders<T>(
   response: NextResponse<T>,
   apiKey: ApiKey
-): NextResponse<T> {
-  const rateLimitStatus = recordAndCheckRateLimit(apiKey);
+): Promise<NextResponse<T>> {
+  const rateLimitStatus = await recordAndCheckRateLimit(apiKey);
   const headers = getRateLimitHeaders(rateLimitStatus);
   
   for (const [key, value] of Object.entries(headers)) {

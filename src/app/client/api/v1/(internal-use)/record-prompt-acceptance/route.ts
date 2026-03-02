@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { api } from "../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
 import { validateInternalApiKey } from "@/lib/internal-auth";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("internal-api");
 
 interface RecordAcceptanceRequest {
   deliveryId: string;
@@ -17,6 +20,8 @@ interface RecordAcceptanceRequest {
  * Requirements: 24.6
  */
 export async function POST(request: NextRequest) {
+  const requestId = crypto.randomUUID();
+
   // Validate API key for internal routes
   const authResult = validateInternalApiKey(request);
   if (!authResult.valid) {
@@ -78,7 +83,7 @@ export async function POST(request: NextRequest) {
       status: 200,
     });
   } catch (error) {
-    console.error("Error recording prompt acceptance:", error);
+    logger.error("Error recording prompt acceptance", { requestId });
     return new Response(JSON.stringify({
       success: false,
       error: "Failed to record prompt acceptance"

@@ -234,8 +234,8 @@
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - _Requirements: 3.4, 3.5, 3.9_
 
-- [-] 7. Fix 5: `authorizeResourceAccess()` Utility (P1)
-  - [-] 7.1 Create `src/lib/partner-api/authorization.ts`
+- [x] 7. Fix 5: `authorizeResourceAccess()` Utility (P1)
+  - [x] 7.1 Create `src/lib/partner-api/authorization.ts`
     - Implement `authorizeResourceAccess(convexClient, partnerId, resourceType, resourceId)`
     - Support resource types: `restaurant`, `order`, `call`, `menu`, `branch`
     - For `restaurant`: check `partner.restaurantIds.includes(resourceId)`
@@ -244,56 +244,56 @@
     - _Bug_Condition: C8 — NOT tenantOwnershipVerified(partnerId, resourceId)_
     - _Expected_Behavior: Returns 403 when partner doesn't own the resource_
     - _Requirements: 2.9_
-  - [~] 7.2 Update all partner route handlers to call `authorizeResourceAccess()` before read/write
+  - [x] 7.2 Update all partner route handlers to call `authorizeResourceAccess()` before read/write
     - Add authorization check in: `branches`, `calls`, `menus`, `orders`, `restaurants`, `webhooks` routes
     - Return 403 Forbidden with error message if authorization fails
     - _Requirements: 2.9_
-  - [~] 7.3 Verify bug condition exploration test (1.5) now passes
+  - [x] 7.3 Verify bug condition exploration test (1.5) now passes
     - **Property 1: Expected Behavior** — Tenant Authorization Enforcement
     - Re-run the SAME test from task 1.5
     - **EXPECTED OUTCOME**: Test PASSES (cross-tenant access returns 403)
     - _Requirements: 2.9_
-  - [~] 7.4 Verify preservation tests still pass
+  - [x] 7.4 Verify preservation tests still pass
     - **Property 2: Preservation** — Valid partner API calls unchanged
     - Re-run tests from task 2.1
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - _Requirements: 3.1_
 
-- [ ] 8. Fix 6: Persistent Callback Context Store (P2)
-  - [~] 8.1 Add `callbackSessions` table to `convex/schema.ts`
+- [x] 8. Fix 6: Persistent Callback Context Store (P2)
+  - [x] 8.1 Add `callbackSessions` table to `convex/schema.ts`
     - Fields: `sessionId`, `phoneNumber`, `reason`, `data`, `isCallback`, `createdAt`, `expiresAt`, `consumed`
     - Indexes: `by_session_id`, `by_expires_at`
     - _Requirements: 2.10_
-  - [~] 8.2 Create `convex/callbackSessions.ts` with mutations
+  - [x] 8.2 Create `convex/callbackSessions.ts` with mutations
     - `createSession(sessionId, phoneNumber, reason, data)` — inserts with `expiresAt = Date.now() + 300_000`
     - `getAndConsumeSession(sessionId)` — reads by index, sets `consumed = true`, returns context
     - `cleanupExpiredSessions()` — scheduled job to delete expired rows
     - _Requirements: 2.10_
-  - [~] 8.3 Update `/callback` route in ws-server
+  - [x] 8.3 Update `/callback` route in ws-server
     - Generate `callbackSessionId = crypto.randomUUID()`
     - Store context via Convex mutation instead of `pendingCallbacks.set()`
     - Pass `callbackSessionId` in Twilio Stream URL query param
     - _Bug_Condition: C9 — storageType == "in_memory_map"_
     - _Expected_Behavior: Context persists across restarts, keyed by UUID not phone number_
     - _Requirements: 2.10_
-  - [~] 8.4 Update `/media-stream-callback` route to read context from Convex by `sessionId`
+  - [x] 8.4 Update `/media-stream-callback` route to read context from Convex by `sessionId`
     - Replace `pendingCallbacks.get(phoneNumber)` with Convex query by `sessionId`
     - _Requirements: 2.10_
-  - [~] 8.5 Remove `pendingCallbacks` Map from ws-server
+  - [x] 8.5 Remove `pendingCallbacks` Map from ws-server
     - Delete the in-memory Map and all references
     - _Requirements: 2.10_
-  - [~] 8.6 Verify preservation tests still pass
+  - [x] 8.6 Verify preservation tests still pass
     - **Property 2: Preservation** — Voice call flow unchanged
     - Re-run tests from task 2.6
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - _Requirements: 3.7_
 
-- [ ] 9. Fix 7: Distributed Rate Limiter (P2)
-  - [~] 9.1 Install dependencies and add env vars
+- [x] 9. Fix 7: Distributed Rate Limiter (P2)
+  - [x] 9.1 Install dependencies and add env vars
     - Install `@upstash/ratelimit` and `@upstash/redis`
     - Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to env config
     - _Requirements: 2.11_
-  - [~] 9.2 Rewrite `src/lib/partner-api/rate-limiter.ts` with Upstash sliding window
+  - [x] 9.2 Rewrite `src/lib/partner-api/rate-limiter.ts` with Upstash sliding window
     - Replace `InMemoryRateLimiter` with `Ratelimit` from `@upstash/ratelimit`
     - Configure sliding window: 1000 requests per 60 seconds
     - Maintain same public API: `checkRateLimit`, `recordAndCheckRateLimit`, `getRateLimitHeaders`, `createRateLimitResponse`
@@ -301,17 +301,17 @@
     - _Bug_Condition: C10 — limiterType == "in_memory" AND serverInstanceCount > 1_
     - _Expected_Behavior: Accurate rate limiting across all server instances_
     - _Requirements: 2.11_
-  - [~] 9.3 Implement fallback to in-memory limiter for local dev
+  - [x] 9.3 Implement fallback to in-memory limiter for local dev
     - If `UPSTASH_REDIS_REST_URL` is not set, fall back to `InMemoryRateLimiter` with console warning
     - _Requirements: 2.11_
-  - [~] 9.4 Verify preservation tests still pass
+  - [x] 9.4 Verify preservation tests still pass
     - **Property 2: Preservation** — Rate limit headers unchanged
     - Re-run tests from task 2.7
     - **EXPECTED OUTCOME**: Tests PASS (confirms header semantics preserved)
     - _Requirements: 3.8_
 
-- [ ] 10. Fix 8: Voice Agent State Machine (P3)
-  - [~] 10.1 Create `src/app/ws-server/call-phase.ts`
+- [x] 10. Fix 8: Voice Agent State Machine (P3)
+  - [x] 10.1 Create `src/app/ws-server/call-phase.ts`
     - Define `CallPhase` type: `await_restaurant_id` → `restaurant_verified` → `order_open` → `order_finalized`
     - Define `ALLOWED_TOOLS` mapping per phase
     - Implement `isToolAllowed(phase, toolName)` — returns boolean
@@ -319,68 +319,68 @@
     - _Bug_Condition: C11 — NOT phaseAllows(currentPhase, toolName)_
     - _Expected_Behavior: Tool calls outside allowed phase are rejected with structured error, no side effects_
     - _Requirements: 2.12_
-  - [~] 10.2 Add phase tracking to WebSocket connections in `src/app/ws-server/index.ts`
+  - [x] 10.2 Add phase tracking to WebSocket connections in `src/app/ws-server/index.ts`
     - Initialize `let callPhase: CallPhase = "await_restaurant_id"` per connection
     - _Requirements: 2.12_
-  - [~] 10.3 Gate tool execution in `response.function_call_arguments.done` handler
+  - [x] 10.3 Gate tool execution in `response.function_call_arguments.done` handler
     - Check `isToolAllowed(callPhase, toolName)` before executing any tool
     - If not allowed: log structured error (callId, phase, tool, timestamp), return error output, produce no side effects
     - If allowed: execute tool, then advance phase via `nextPhase()` on success
     - Phase transitions: `get_restaurant_details` success → `restaurant_verified`, `generate_order_id` success → `order_open`, `upsert_order` with completed status → `order_finalized`
     - _Requirements: 2.12_
-  - [~] 10.4 Verify preservation tests still pass
+  - [x] 10.4 Verify preservation tests still pass
     - **Property 2: Preservation** — Normal voice call flow unchanged
     - Re-run tests from task 2.6
     - **EXPECTED OUTCOME**: Tests PASS (normal phase progression still works)
     - _Requirements: 3.7_
 
-- [ ] 11. Fix 9: Structured Logging + Webhook Idempotency (P3)
-  - [~] 11.1 Create `src/lib/logger.ts`
+- [x] 11. Fix 9: Structured Logging + Webhook Idempotency (P3)
+  - [x] 11.1 Create `src/lib/logger.ts`
     - Implement `createLogger(module)` returning `{ info, warn, error, debug }` methods
     - Each method accepts `(message, context?)` where context includes `callId`, `requestId`, `orderId`, `partnerId`
     - Output structured JSON with `level`, `module`, `message`, `timestamp`, and all context fields
     - _Bug_Condition: C12 — correlationId == undefined_
     - _Expected_Behavior: All log entries are structured JSON with correlation IDs_
     - _Requirements: 2.13_
-  - [~] 11.2 Replace `console.log`/`console.error` in internal-use routes with structured logger
+  - [x] 11.2 Replace `console.log`/`console.error` in internal-use routes with structured logger
     - Import `createLogger` in each internal-use route handler
     - Pass `requestId` as correlation ID
     - _Requirements: 2.13_
-  - [~] 11.3 Replace `console.log`/`console.error` in ws-server handlers with structured logger
+  - [x] 11.3 Replace `console.log`/`console.error` in ws-server handlers with structured logger
     - Import `createLogger` in ws-server `index.ts` and `tools.ts`
     - Pass `callId` as correlation ID
     - _Requirements: 2.13_
-  - [~] 11.4 Replace `console.log`/`console.error` in webhook routes with structured logger
+  - [x] 11.4 Replace `console.log`/`console.error` in webhook routes with structured logger
     - Import `createLogger` in Paystack and Flutterwave route handlers
     - Pass `eventId` and `orderId` as correlation IDs
     - _Requirements: 2.13_
-  - [~] 11.5 Implement atomic webhook idempotency in `convex/webhookEvents.ts`
+  - [x] 11.5 Implement atomic webhook idempotency in `convex/webhookEvents.ts`
     - Create `atomicInsertWebhookEvent` mutation that checks-and-inserts in a single Convex transaction
     - Query `by_event_id` index, return `{ inserted: false }` if exists, otherwise insert and return `{ inserted: true, id }`
     - Convex mutations are serialized per document, eliminating TOCTOU race
     - _Bug_Condition: C13 — NOT atomicIdempotencyGuard(eventId)_
     - _Expected_Behavior: Duplicate webhook events return 200 with no side effects, exactly-once processing_
     - _Requirements: 2.14_
-  - [~] 11.6 Update Paystack webhook handler to use atomic idempotency
+  - [x] 11.6 Update Paystack webhook handler to use atomic idempotency
     - Call `atomicInsertWebhookEvent` first in `src/app/client/api/v1/webhooks/paystack/route.ts`
     - If `inserted === false`, return `NextResponse.json({ status: "already_processed" }, { status: 200 })`
     - Only proceed with payment processing if `inserted === true`
     - _Requirements: 2.14_
-  - [~] 11.7 Update Flutterwave webhook handler to use atomic idempotency
+  - [x] 11.7 Update Flutterwave webhook handler to use atomic idempotency
     - Same pattern as 11.6 in `src/app/client/api/v1/webhooks/flutterwave/route.ts`
     - _Requirements: 2.14_
-  - [~] 11.8 Verify bug condition exploration test (1.6) now passes
+  - [x] 11.8 Verify bug condition exploration test (1.6) now passes
     - **Property 1: Expected Behavior** — Atomic Webhook Idempotency
     - Re-run the SAME test from task 1.6
     - **EXPECTED OUTCOME**: Test PASSES (duplicate webhooks are deduplicated)
     - _Requirements: 2.14_
-  - [~] 11.9 Verify preservation tests still pass
+  - [x] 11.9 Verify preservation tests still pass
     - **Property 2: Preservation** — Valid webhooks and call flows unchanged
     - Re-run tests from tasks 2.5, 2.6
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - _Requirements: 3.6, 3.7_
 
-- [ ] 12. Checkpoint — Ensure all tests pass
+- [x] 12. Checkpoint — Ensure all tests pass
   - Re-run ALL exploration tests (task 1) — all should now PASS
   - Re-run ALL preservation tests (task 2) — all should still PASS
   - Run `npx tsc --noEmit` — 0 type errors

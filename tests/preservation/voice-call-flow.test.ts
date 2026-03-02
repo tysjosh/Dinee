@@ -121,11 +121,12 @@ function extractImportsFrom(source: string, modulePattern: string): string[] {
 
 /**
  * Extract the tool dispatch switch block from a specific WebSocket route handler.
- * Looks for `switch (res.name)` blocks within the source.
+ * Looks for `switch (res.name)` or `switch (toolName)` blocks within the source.
+ * The state machine refactor extracts `const toolName = res.name` before the switch.
  */
 function extractToolSwitchBlocks(source: string): string[] {
   const blocks: string[] = [];
-  const switchPattern = /switch\s*\(\s*res\.name\s*\)\s*\{/g;
+  const switchPattern = /switch\s*\(\s*(?:res\.name|toolName)\s*\)\s*\{/g;
   let match: RegExpExecArray | null;
 
   while ((match = switchPattern.exec(source)) !== null) {

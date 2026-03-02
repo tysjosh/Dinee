@@ -16,6 +16,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { PaystackProvider } from "@/lib/payment/PaystackProvider";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("webhook-paystack");
 
 // ============================================================================
 // Types
@@ -68,7 +71,7 @@ function generateEventId(payload: PaystackWebhookPayload): string {
 function getConvexClient(): ConvexHttpClient | null {
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
-    console.error("NEXT_PUBLIC_CONVEX_URL environment variable is not set");
+    logger.error("NEXT_PUBLIC_CONVEX_URL environment variable is not set");
     return null;
   }
   return new ConvexHttpClient(convexUrl);
@@ -80,7 +83,7 @@ function getConvexClient(): ConvexHttpClient | null {
 function getPaystackProvider(): PaystackProvider | null {
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) {
-    console.error("PAYSTACK_SECRET_KEY environment variable is not set");
+    logger.error("PAYSTACK_SECRET_KEY environment variable is not set");
     return null;
   }
   return new PaystackProvider({ secretKey });
@@ -110,7 +113,7 @@ export async function POST(request: NextRequest) {
     rawBody = await request.text();
     payload = JSON.parse(rawBody);
   } catch {
-    console.error("Paystack webhook: Invalid JSON body");
+    logger.error("Paystack webhook: Invalid JSON body");
     return NextResponse.json(
       { error: "Invalid JSON body" },
       { status: 400 }
@@ -123,7 +126,7 @@ export async function POST(request: NextRequest) {
   // Initialize Paystack provider for signature verification
   const paystackProvider = getPaystackProvider();
   if (!paystackProvider) {
-    console.error("Paystack webhook: Failed to initialize Paystack provider");
+    logger.error("Paystack webhook: Failed to initialize Paystack provider");
     return NextResponse.json(
       { error: "Server configuration error" },
       { status: 500 }
@@ -133,7 +136,7 @@ export async function POST(request: NextRequest) {
   // Initialize Convex client
   const convexClient = getConvexClient();
   if (!convexClient) {
-    console.error("Paystack webhook: Failed to initialize Convex client");
+    logger.error("Paystack webhook: Failed to initialize Convex client");
     return NextResponse.json(
       { error: "Server configuration error" },
       { status: 500 }
@@ -147,41 +150,34 @@ export async function POST(request: NextRequest) {
   // Note: We need to verify using the raw body string, not the parsed object
   const isValidSignature = paystackProvider.verifyWebhookSignature(rawBody, signature);
 
-  // Log the webhook event (even if signature is invalid, for audit purposes)
+  // Atomic idempotency check — insert-first strategy eliminates TOCTOU race
   try {
-    // Check if event was already processed (idempotency check)
-    const existingEvent = await convexClient.query(
-      api.webhookEvents.getWebhookEventByEventId,
-      { eventId }
+    const insertResult = await convexClient.mutation(
+      api.webhookEvents.atomicInsertWebhookEvent,
+      {
+        eventId,
+        provider: "paystack",
+        eventType: payload.event,
+        payload: rawBody,
+        signature: signature || undefined,
+        verified: isValidSignature,
+        processed: false,
+        orderId: payload.data.metadata?.orderId,
+      }
     );
 
-    if (existingEvent?.processed) {
-      console.log(`Paystack webhook: Event ${eventId} already processed, skipping`);
-      return NextResponse.json(
-        { message: "Event already processed" },
-        { status: 200 }
-      );
+    if (!insertResult.inserted) {
+      logger.info(`Paystack webhook: Event ${eventId} already processed, skipping`, { eventId });
+      return NextResponse.json({ status: "already_processed" }, { status: 200 });
     }
-
-    // Log the webhook event
-    await convexClient.mutation(api.webhookEvents.createWebhookEvent, {
-      eventId,
-      provider: "paystack",
-      eventType: payload.event,
-      payload: rawBody,
-      signature: signature || undefined,
-      verified: isValidSignature,
-      processed: false,
-      orderId: payload.data.metadata?.orderId,
-    });
   } catch (error) {
-    console.error("Paystack webhook: Failed to log webhook event:", error);
+    logger.error("Paystack webhook: Failed to log webhook event", { eventId });
     // Continue processing even if logging fails
   }
 
   // Reject invalid signatures
   if (!isValidSignature) {
-    console.warn(`Paystack webhook: Invalid signature for event ${eventId}`);
+    logger.warn(`Paystack webhook: Invalid signature for event ${eventId}`, { eventId });
     return NextResponse.json(
       { error: "Invalid webhook signature" },
       { status: 422 }
@@ -192,14 +188,14 @@ export async function POST(request: NextRequest) {
   const orderId = payload.data.metadata?.orderId;
   
   if (!orderId) {
-    console.warn(`Paystack webhook: No orderId in metadata for event ${eventId}`);
+    logger.warn(`Paystack webhook: No orderId in metadata for event ${eventId}`, { eventId });
     // Mark as processed since we can't do anything without an order ID
     try {
       await convexClient.mutation(api.webhookEvents.markWebhookEventAsProcessed, {
         eventId,
       });
     } catch (error) {
-      console.error("Paystack webhook: Failed to mark event as processed:", error);
+      logger.error("Paystack webhook: Failed to mark event as processed", { eventId });
     }
     return NextResponse.json(
       { message: "Webhook received but no orderId in metadata" },
@@ -231,7 +227,7 @@ export async function POST(request: NextRequest) {
         break;
       
       default:
-        console.log(`Paystack webhook: Unhandled event type: ${payload.event}`);
+        logger.info(`Paystack webhook: Unhandled event type: ${payload.event}`, { eventId });
     }
 
     // Mark the webhook event as processed
@@ -245,7 +241,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error(`Paystack webhook: Error processing event ${eventId}:`, error);
+    logger.error(`Paystack webhook: Error processing event ${eventId}`, { eventId, orderId });
     return NextResponse.json(
       { error: "Failed to process webhook" },
       { status: 500 }
@@ -268,7 +264,7 @@ async function handlePaymentSuccess(
   orderId: string,
   payload: PaystackWebhookPayload
 ): Promise<void> {
-  console.log(`Paystack webhook: Processing payment success for order ${orderId}`);
+  logger.info(`Paystack webhook: Processing payment success for order ${orderId}`, { orderId });
 
   try {
     // Look up order to get restaurantId
@@ -285,9 +281,9 @@ async function handlePaymentSuccess(
       paymentTimestamp: Date.now(),
     });
 
-    console.log(`Paystack webhook: Order ${orderId} payment status updated to "paid"`);
+    logger.info(`Paystack webhook: Order ${orderId} payment status updated to "paid"`, { orderId });
   } catch (error) {
-    console.error(`Paystack webhook: Failed to update payment status for order ${orderId}:`, error);
+    logger.error(`Paystack webhook: Failed to update payment status for order ${orderId}`, { orderId });
     throw error;
   }
 }
@@ -303,7 +299,7 @@ async function handlePaymentFailure(
   orderId: string,
   payload: PaystackWebhookPayload
 ): Promise<void> {
-  console.log(`Paystack webhook: Processing payment failure for order ${orderId}`);
+  logger.info(`Paystack webhook: Processing payment failure for order ${orderId}`, { orderId });
 
   try {
     // Look up order to get restaurantId
@@ -320,7 +316,7 @@ async function handlePaymentFailure(
       paymentTimestamp: Date.now(),
     });
 
-    console.log(`Paystack webhook: Order ${orderId} payment status updated to "failed"`);
+    logger.info(`Paystack webhook: Order ${orderId} payment status updated to "failed"`, { orderId });
 
     // TODO: Implement branch notification
     // This could be done via:
@@ -329,9 +325,9 @@ async function handlePaymentFailure(
     // 3. Email notification
     // For now, the real-time update through Convex will notify the branch dashboard
     
-    console.log(`Paystack webhook: Branch notification pending for order ${orderId} payment failure`);
+    logger.info(`Paystack webhook: Branch notification pending for order ${orderId} payment failure`, { orderId });
   } catch (error) {
-    console.error(`Paystack webhook: Failed to update payment status for order ${orderId}:`, error);
+    logger.error(`Paystack webhook: Failed to update payment status for order ${orderId}`, { orderId });
     throw error;
   }
 }
@@ -345,7 +341,7 @@ async function handleRefund(
   orderId: string,
   payload: PaystackWebhookPayload
 ): Promise<void> {
-  console.log(`Paystack webhook: Processing refund for order ${orderId}`);
+  logger.info(`Paystack webhook: Processing refund for order ${orderId}`, { orderId });
 
   try {
     // Look up order to get restaurantId
@@ -362,9 +358,9 @@ async function handleRefund(
       paymentTimestamp: Date.now(),
     });
 
-    console.log(`Paystack webhook: Order ${orderId} payment status updated to "refunded"`);
+    logger.info(`Paystack webhook: Order ${orderId} payment status updated to "refunded"`, { orderId });
   } catch (error) {
-    console.error(`Paystack webhook: Failed to update payment status for order ${orderId}:`, error);
+    logger.error(`Paystack webhook: Failed to update payment status for order ${orderId}`, { orderId });
     throw error;
   }
 }

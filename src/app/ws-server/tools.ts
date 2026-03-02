@@ -1,4 +1,7 @@
 import { nanoid } from "nanoid";
+import { createLogger } from "../../lib/logger.ts";
+
+const logger = createLogger("ws-server-tools");
 
 const NEXT_APP_URL = process.env.NEXT_APP_URL || "http://localhost:3000";
 
@@ -218,7 +221,7 @@ export async function wrapperMatchUpsellPrompts(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error matching upsell prompts:", error);
+    logger.error("Error matching upsell prompts", {});
     return { success: false, error: "Failed to fetch upsell prompts" };
   }
 }
@@ -256,7 +259,7 @@ export async function wrapperRecordPromptAcceptance(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error recording prompt acceptance:", error);
+    logger.error("Error recording prompt acceptance", {});
     return { success: false, error: "Failed to record prompt acceptance" };
   }
 }
@@ -355,7 +358,7 @@ export async function wrapperCheckBlocked(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error checking blocked status:", error);
+    logger.error("Error checking blocked status", {});
     return { success: false, error: "Failed to check blocked status" };
   }
 }

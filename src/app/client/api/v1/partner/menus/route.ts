@@ -13,6 +13,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -82,18 +83,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   }
   
   try {
-    // Get partner to check restaurant access
-    const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
-      partnerId: context.partnerId,
-    });
-    
-    if (!partner) {
-      return NextResponse.json(
-        { error: 'Not Found', message: 'Partner not found' },
-        { status: 404 }
-      );
-    }
-    
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams;
     const restaurantId = searchParams.get('restaurantId');
@@ -109,25 +98,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       );
     }
     
-    // Check if partner has access to this restaurant
-    const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
-      restaurantId,
-    });
-    
-    if (!restaurant || restaurant.platformId !== partner.platformId) {
+    // Authorize: verify partner owns this restaurant
+    const authz = await authorizeResourceAccess(convexClient, context.partnerId, 'restaurant', restaurantId);
+    if (!authz.authorized) {
       return NextResponse.json(
-        { error: 'Forbidden', message: 'Access denied to this restaurant' },
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
         { status: 403 }
       );
-    }
-    
-    if (partner.restaurantIds && partner.restaurantIds.length > 0) {
-      if (!partner.restaurantIds.includes(restaurantId)) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Access denied to this restaurant' },
-          { status: 403 }
-        );
-      }
     }
     
     // Get menu items
@@ -171,7 +148,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     }));
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

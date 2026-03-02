@@ -762,4 +762,19 @@ export default defineSchema({
     lastUpdated: v.number(),
   })
     .index("by_target", ["target"]),
+
+  // Callback Sessions (persistent callback context store)
+  // Replaces in-memory pendingCallbacks Map for restart-safe callback handoff
+  callbackSessions: defineTable({
+    sessionId: v.string(),       // UUID generated at callback initiation
+    phoneNumber: v.string(),
+    reason: v.optional(v.string()),
+    data: v.optional(v.string()),
+    isCallback: v.boolean(),
+    createdAt: v.number(),
+    expiresAt: v.number(),       // TTL: createdAt + 5 minutes
+    consumed: v.boolean(),       // Set true after media-stream-callback reads it
+  })
+    .index("by_session_id", ["sessionId"])
+    .index("by_expires_at", ["expiresAt"]),
 });

@@ -13,6 +13,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -78,7 +79,24 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   }
   
   try {
-    // Get partner to check restaurant access
+    // Parse query parameters
+    const searchParams = request.nextUrl.searchParams;
+    const restaurantIdFilter = searchParams.get('restaurantId');
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get('perPage') || '20', 10)));
+    
+    // If a specific restaurantId is provided, authorize access to it
+    if (restaurantIdFilter) {
+      const authz = await authorizeResourceAccess(convexClient, context.partnerId, 'restaurant', restaurantIdFilter);
+      if (!authz.authorized) {
+        return NextResponse.json(
+          { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+          { status: 403 }
+        );
+      }
+    }
+    
+    // Get partner to determine accessible restaurants
     const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
       partnerId: context.partnerId,
     });
@@ -90,18 +108,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       );
     }
     
-    // Parse query parameters
-    const searchParams = request.nextUrl.searchParams;
-    const restaurantIdFilter = searchParams.get('restaurantId');
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get('perPage') || '20', 10)));
-    
     // Get restaurants for the partner's platform
     const restaurants = await convexClient.query(api.restaurants.getRestaurantsByPlatform, {
       platformId: partner.platformId,
     });
     
-    // Filter by partner's restaurant access if specified
+    // Filter by partner's restaurant access
     let accessibleRestaurantIds = restaurants.map((r: { restaurantId: string }) => r.restaurantId);
     if (partner.restaurantIds && partner.restaurantIds.length > 0) {
       accessibleRestaurantIds = accessibleRestaurantIds.filter((id: string) => 
@@ -109,14 +121,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       );
     }
     
-    // Apply restaurant filter if specified
+    // Apply restaurant filter if specified (already authorized above)
     if (restaurantIdFilter) {
-      if (!accessibleRestaurantIds.includes(restaurantIdFilter)) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Access denied to this restaurant' },
-          { status: 403 }
-        );
-      }
       accessibleRestaurantIds = [restaurantIdFilter];
     }
     
@@ -148,7 +154,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     const paginatedBranches = allBranches.slice(startIndex, startIndex + perPage);
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

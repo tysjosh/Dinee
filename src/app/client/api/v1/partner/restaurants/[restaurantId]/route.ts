@@ -13,6 +13,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -78,15 +79,12 @@ export async function GET(
   }
   
   try {
-    // Get partner to check restaurant access
-    const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
-      partnerId: context.partnerId,
-    });
-    
-    if (!partner) {
+    // Authorize: verify partner owns this restaurant
+    const authz = await authorizeResourceAccess(convexClient, context.partnerId, 'restaurant', restaurantId);
+    if (!authz.authorized) {
       return NextResponse.json(
-        { error: 'Not Found', message: 'Partner not found' },
-        { status: 404 }
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { status: 403 }
       );
     }
     
@@ -102,23 +100,6 @@ export async function GET(
       );
     }
     
-    // Check if partner has access to this restaurant
-    if (restaurant.platformId !== partner.platformId) {
-      return NextResponse.json(
-        { error: 'Forbidden', message: 'Access denied to this restaurant' },
-        { status: 403 }
-      );
-    }
-    
-    if (partner.restaurantIds && partner.restaurantIds.length > 0) {
-      if (!partner.restaurantIds.includes(restaurantId)) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Access denied to this restaurant' },
-          { status: 403 }
-        );
-      }
-    }
-    
     // Map to response format
     const responseData: RestaurantDetailResponse = {
       restaurantId: restaurant.restaurantId,
@@ -132,7 +113,7 @@ export async function GET(
     };
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

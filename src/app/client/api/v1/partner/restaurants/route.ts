@@ -13,6 +13,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   }
   
   try {
-    // Get partner to check restaurant access
+    // Get partner to determine accessible restaurants
     const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
       partnerId: context.partnerId,
     });
@@ -93,12 +94,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       platformId: partner.platformId,
     });
     
-    // Filter by partner's restaurant access if specified
-    let filteredRestaurants = restaurants;
-    if (partner.restaurantIds && partner.restaurantIds.length > 0) {
-      filteredRestaurants = restaurants.filter((r: { restaurantId: string }) => 
-        partner.restaurantIds!.includes(r.restaurantId)
-      );
+    // Authorize: filter to only restaurants the partner owns
+    const authorizedRestaurants = [];
+    for (const r of restaurants) {
+      const authz = await authorizeResourceAccess(convexClient, context.partnerId, 'restaurant', r.restaurantId);
+      if (authz.authorized) {
+        authorizedRestaurants.push(r);
+      }
     }
     
     // Parse pagination parameters
@@ -107,10 +109,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get('perPage') || '20', 10)));
     
     // Apply pagination
-    const total = filteredRestaurants.length;
+    const total = authorizedRestaurants.length;
     const totalPages = Math.ceil(total / perPage);
     const startIndex = (page - 1) * perPage;
-    const paginatedRestaurants = filteredRestaurants.slice(startIndex, startIndex + perPage);
+    const paginatedRestaurants = authorizedRestaurants.slice(startIndex, startIndex + perPage);
     
     // Map to response format
     const responseData: RestaurantResponse[] = paginatedRestaurants.map((r: { restaurantId: string; platformId: string; name: string; agentName: string; languagePreference: string; branchCount?: number; createdAt: number }) => ({
@@ -124,7 +126,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     }));
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

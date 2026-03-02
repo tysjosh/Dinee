@@ -11,6 +11,9 @@ import { api } from "../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
 import { NextRequest, NextResponse } from "next/server";
 import { validateInternalApiKey } from "@/lib/internal-auth";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("internal-api");
 
 // ============================================================================
 // Types (inline to avoid module resolution issues)
@@ -157,6 +160,8 @@ interface CheckBlockedResponse {
  * @see Requirements: 25.4
  */
 export async function POST(request: NextRequest): Promise<Response> {
+  const requestId = crypto.randomUUID();
+
   // Validate API key for internal routes
   const authResult = validateInternalApiKey(request);
   if (!authResult.valid) {
@@ -240,7 +245,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       status: 200,
     });
   } catch (error) {
-    console.error("Error checking blocked status:", error);
+    logger.error("Error checking blocked status", { requestId });
     const response: CheckBlockedResponse = {
       success: false,
       error: "Failed to check blocked status"

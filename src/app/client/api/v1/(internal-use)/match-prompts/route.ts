@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { api } from "../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
 import { validateInternalApiKey } from "@/lib/internal-auth";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("internal-api");
 
 interface MatchPromptsRequest {
   restaurantId: string;
@@ -23,6 +26,8 @@ interface MatchPromptsRequest {
  * Requirements: 24.3, 24.6
  */
 export async function POST(request: NextRequest) {
+  const requestId = crypto.randomUUID();
+
   // Validate API key for internal routes
   const authResult = validateInternalApiKey(request);
   if (!authResult.valid) {
@@ -91,7 +96,7 @@ export async function POST(request: NextRequest) {
       status: 200,
     });
   } catch (error) {
-    console.error("Error matching prompts:", error);
+    logger.error("Error matching prompts", { requestId });
     return new Response(JSON.stringify({
       success: false,
       error: "Failed to match prompts"

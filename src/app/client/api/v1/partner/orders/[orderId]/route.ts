@@ -13,6 +13,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
+import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -98,18 +99,6 @@ export async function GET(
   }
   
   try {
-    // Get partner to check restaurant access
-    const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
-      partnerId: context.partnerId,
-    });
-    
-    if (!partner) {
-      return NextResponse.json(
-        { error: 'Not Found', message: 'Partner not found' },
-        { status: 404 }
-      );
-    }
-    
     // Get the order
     const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
@@ -122,25 +111,13 @@ export async function GET(
       );
     }
     
-    // Check if partner has access to this restaurant
-    const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
-      restaurantId: order.restaurantId,
-    });
-    
-    if (!restaurant || restaurant.platformId !== partner.platformId) {
+    // Authorize: verify partner owns the restaurant this order belongs to
+    const authz = await authorizeResourceAccess(convexClient, context.partnerId, 'restaurant', order.restaurantId);
+    if (!authz.authorized) {
       return NextResponse.json(
-        { error: 'Forbidden', message: 'Access denied to this order' },
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
         { status: 403 }
       );
-    }
-    
-    if (partner.restaurantIds && partner.restaurantIds.length > 0) {
-      if (!partner.restaurantIds.includes(order.restaurantId)) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Access denied to this order' },
-          { status: 403 }
-        );
-      }
     }
     
     // Map to response format
@@ -171,7 +148,7 @@ export async function GET(
     };
     
     // Add rate limit headers
-    const rateLimitStatus = checkRateLimit(context.apiKey);
+    const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
     
     return NextResponse.json(

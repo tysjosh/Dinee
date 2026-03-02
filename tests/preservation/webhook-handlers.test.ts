@@ -9,7 +9,7 @@
  *   1. Both webhook handler files exist and export POST handlers
  *   2. Paystack verifies signatures via crypto.createHmac (in PaystackProvider)
  *   3. Flutterwave verifies webhooks via verifyWebhookSignature / verifyTransaction
- *   4. Both check for duplicate events via webhookEvents queries
+ *   4. Both check for duplicate events via atomic idempotency (atomicInsertWebhookEvent)
  *   5. Both process payment status updates via Convex mutations
  *   6. Both return NextResponse.json with status 200 for valid webhooks
  *
@@ -172,23 +172,26 @@ describe('Webhook Handler Preservation — Baseline Behavior', () => {
     });
   });
 
-  // ---- 3. Duplicate event checking via webhookEvents queries ----
+  // ---- 3. Duplicate event checking via atomic idempotency ----
+  // NOTE: Updated to reflect atomic idempotency pattern (atomicInsertWebhookEvent)
+  // introduced in Fix 9 (task 11.5-11.7), replacing the racy query-then-insert pattern.
+  // The behavioral guarantee is the same: duplicate events are detected and skipped.
   describe('3. Duplicate event checking (idempotency)', () => {
     for (const handler of WEBHOOK_HANDLERS) {
-      it(`${handler.provider} handler checks for existing events via webhookEvents query`, () => {
+      it(`${handler.provider} handler uses atomic idempotency check via atomicInsertWebhookEvent`, () => {
         const source = readSourceFile(handler.filePath);
-        // Both handlers query getWebhookEventByEventId for idempotency
+        // Handlers now use atomicInsertWebhookEvent for TOCTOU-safe idempotency
         expect(
-          source.includes('getWebhookEventByEventId'),
-          `${handler.provider} handler does not query getWebhookEventByEventId`
+          source.includes('atomicInsertWebhookEvent'),
+          `${handler.provider} handler does not use atomicInsertWebhookEvent`
         ).toBe(true);
       });
 
-      it(`${handler.provider} handler checks processed flag on existing events`, () => {
+      it(`${handler.provider} handler checks insertResult.inserted for deduplication`, () => {
         const source = readSourceFile(handler.filePath);
         expect(
-          /existingEvent\?\.processed/.test(source),
-          `${handler.provider} handler does not check existingEvent.processed`
+          /insertResult\.inserted/.test(source) || /!insertResult\.inserted/.test(source),
+          `${handler.provider} handler does not check insertResult.inserted`
         ).toBe(true);
       });
 
@@ -236,11 +239,11 @@ describe('Webhook Handler Preservation — Baseline Behavior', () => {
         ).toBe(true);
       });
 
-      it(`${handler.provider} handler logs events via api.webhookEvents.createWebhookEvent`, () => {
+      it(`${handler.provider} handler logs events via api.webhookEvents.atomicInsertWebhookEvent`, () => {
         const source = readSourceFile(handler.filePath);
         expect(
-          source.includes('api.webhookEvents.createWebhookEvent'),
-          `${handler.provider} handler does not call createWebhookEvent`
+          source.includes('api.webhookEvents.atomicInsertWebhookEvent'),
+          `${handler.provider} handler does not call atomicInsertWebhookEvent`
         ).toBe(true);
       });
 
@@ -331,15 +334,15 @@ describe('Webhook Handler Preservation — Baseline Behavior', () => {
           // Calls verifyWebhookSignature
           expect(/verifyWebhookSignature\s*\(/.test(source)).toBe(true);
 
-          // Checks for duplicate events
-          expect(source.includes('getWebhookEventByEventId')).toBe(true);
-          expect(/existingEvent\?\.processed/.test(source)).toBe(true);
+          // Checks for duplicate events via atomic idempotency
+          expect(source.includes('atomicInsertWebhookEvent')).toBe(true);
+          expect(/insertResult\.inserted/.test(source) || /!insertResult\.inserted/.test(source)).toBe(true);
 
           // Processes payments via Convex mutation
           expect(source.includes('api.orders.updatePaymentStatus')).toBe(true);
 
-          // Logs webhook events
-          expect(source.includes('api.webhookEvents.createWebhookEvent')).toBe(true);
+          // Logs webhook events via atomic insert
+          expect(source.includes('api.webhookEvents.atomicInsertWebhookEvent')).toBe(true);
 
           // Marks events as processed
           expect(source.includes('markWebhookEventAsProcessed')).toBe(true);
