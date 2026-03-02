@@ -26,6 +26,7 @@ import type {
 import { createPaystackProvider } from '../payment/PaystackProvider';
 import { createFlutterwaveProvider } from '../payment/FlutterwaveProvider';
 import type { PaymentProvider } from '../payment/types';
+import type { Order } from '@/types/global.d';
 
 // ============================================================================
 // Subscription Plans
@@ -321,19 +322,20 @@ export class SubscriptionService {
         const provider = this.getPaymentProvider(paymentProvider);
         
         // Create a mock order object for payment initialization
-        const paymentOrder = {
+        const paymentOrder: Order = {
           id: subscriptionId,
-          orderId: subscriptionId,
           restaurantId,
           customerName: `Subscription: ${plan.name}`,
           phoneNumber: '',
           items: [{
+            id: `item_${subscriptionId}`,
             name: `${plan.name} Plan (${billingCycle})`,
             quantity: 1,
             price,
           }],
           totalAmount: price,
           status: 'active' as const,
+          timestamp: new Date(),
         };
 
         const paymentResult = await provider.initializeTransaction(paymentOrder);
@@ -392,19 +394,20 @@ export class SubscriptionService {
       const provider = this.getPaymentProvider(subscription.paymentProvider);
 
       // Create payment order
-      const paymentOrder = {
+      const paymentOrder: Order = {
         id: subscription.subscriptionId,
-        orderId: subscription.subscriptionId,
         restaurantId: subscription.restaurantId,
         customerName: `Subscription Renewal: ${plan.name}`,
         phoneNumber: '',
         items: [{
+          id: `item_${subscription.subscriptionId}`,
           name: `${plan.name} Plan (${subscription.billingCycle})`,
           quantity: 1,
           price,
         }],
         totalAmount: price,
         status: 'active' as const,
+        timestamp: new Date(),
       };
 
       const paymentResult = await provider.initializeTransaction(paymentOrder);

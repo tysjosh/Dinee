@@ -235,7 +235,7 @@ export function transformFromLegacyMode<T extends Record<string, unknown>>(
   context: FeatureFlagContext
 ): T {
   // Create a copy to avoid mutating the original
-  const transformed = { ...data };
+  const transformed = { ...data } as Record<string, unknown>;
   
   switch (entityType) {
     case 'restaurant':
@@ -267,7 +267,7 @@ export function transformFromLegacyMode<T extends Record<string, unknown>>(
       break;
   }
   
-  return transformed;
+  return transformed as T;
 }
 
 /**

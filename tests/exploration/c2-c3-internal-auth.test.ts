@@ -22,6 +22,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
+function setNodeEnv(value: string) {
+  (process.env as Record<string, string | undefined>).NODE_ENV = value;
+}
+
 // ---------------------------------------------------------------------------
 // C2: Fail-open internal auth
 // ---------------------------------------------------------------------------
@@ -52,7 +56,7 @@ describe('C2: Fail-Open Internal Auth — Exploration Test', () => {
     // allowing unauthenticated access.
 
     delete process.env.INTERNAL_API_KEY;
-    process.env.NODE_ENV = 'production';
+    setNodeEnv('production');
 
     const { validateInternalApiKey } = await import('../../src/lib/internal-auth');
 

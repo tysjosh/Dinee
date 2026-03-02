@@ -13,6 +13,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { validateInternalApiKey } from "./internal-auth";
 import { NextRequest } from "next/server";
 
+function setNodeEnv(value: string) {
+  (process.env as Record<string, string | undefined>).NODE_ENV = value;
+}
+
 function makeRequest(headers: Record<string, string> = {}): NextRequest {
   return new NextRequest("http://localhost:3000/api/v1/upsert-order", {
     method: "POST",
@@ -76,7 +80,7 @@ describe("validateInternalApiKey", () => {
   describe("when INTERNAL_API_KEY is unset and NODE_ENV=development", () => {
     it("allows requests (dev bypass)", () => {
       delete process.env.INTERNAL_API_KEY;
-      process.env.NODE_ENV = "development";
+      setNodeEnv("development");
       const req = makeRequest();
       const result = validateInternalApiKey(req);
       expect(result).toEqual({ valid: true });
@@ -84,7 +88,7 @@ describe("validateInternalApiKey", () => {
 
     it("allows requests even with a random header value", () => {
       delete process.env.INTERNAL_API_KEY;
-      process.env.NODE_ENV = "development";
+      setNodeEnv("development");
       const req = makeRequest({ "x-api-key": "anything" });
       const result = validateInternalApiKey(req);
       expect(result).toEqual({ valid: true });
@@ -94,7 +98,7 @@ describe("validateInternalApiKey", () => {
   describe("when INTERNAL_API_KEY is unset and NODE_ENV is NOT development (fail-closed)", () => {
     it("returns 500 misconfiguration in production", () => {
       delete process.env.INTERNAL_API_KEY;
-      process.env.NODE_ENV = "production";
+      setNodeEnv("production");
       const req = makeRequest();
       const result = validateInternalApiKey(req);
       expect(result).toEqual({
@@ -106,7 +110,7 @@ describe("validateInternalApiKey", () => {
 
     it("returns 500 misconfiguration in staging", () => {
       delete process.env.INTERNAL_API_KEY;
-      process.env.NODE_ENV = "staging";
+      setNodeEnv("staging");
       const req = makeRequest();
       const result = validateInternalApiKey(req);
       expect(result).toEqual({
@@ -118,7 +122,7 @@ describe("validateInternalApiKey", () => {
 
     it("returns 500 misconfiguration in test", () => {
       delete process.env.INTERNAL_API_KEY;
-      process.env.NODE_ENV = "test";
+      setNodeEnv("test");
       const req = makeRequest();
       const result = validateInternalApiKey(req);
       expect(result).toEqual({
