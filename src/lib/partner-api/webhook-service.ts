@@ -17,6 +17,10 @@ import type {
   WebhookEventType,
 } from './types';
 import { generateWebhookSignature } from './auth';
+import {
+  buildRunsheetBody,
+  signRunsheet,
+} from '../logistics/runsheet-webhook-mapper';
 
 // ============================================================================
 // Constants
@@ -142,6 +146,29 @@ export async function deliverWebhook(
   error?: string;
   duration: number;
 }> {
+  const mode = subscription.mode ?? "partner";
+
+  if (mode === "runsheet") {
+    return deliverRunsheetWebhook(subscription, payload);
+  }
+
+  return deliverPartnerWebhook(subscription, payload);
+}
+
+/**
+ * Partner-mode delivery (existing behaviour).
+ * Signs with `${timestamp}.${body}` and sends X-Webhook-Signature / X-Webhook-Timestamp.
+ */
+async function deliverPartnerWebhook(
+  subscription: WebhookSubscription,
+  payload: WebhookPayload<unknown>
+): Promise<{
+  success: boolean;
+  statusCode?: number;
+  responseBody?: string;
+  error?: string;
+  duration: number;
+}> {
   const startTime = Date.now();
   const payloadString = JSON.stringify(payload);
   const { signature, timestamp } = signWebhookPayload(payload, subscription.secret);
@@ -184,7 +211,6 @@ export async function deliverWebhook(
     const duration = Date.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Check if it was a timeout
     if (errorMessage.includes('abort')) {
       return {
         success: false,
@@ -194,6 +220,88 @@ export async function deliverWebhook(
       };
     }
     
+    return {
+      success: false,
+      statusCode: 0,
+      error: errorMessage,
+      duration,
+    };
+  }
+}
+
+/**
+ * Runsheet-mode delivery.
+ * Builds the Runsheet envelope, signs the raw JSON body with HMAC-SHA256
+ * (no timestamp prefix), and sends X-Dinee-Signature.
+ *
+ * tenant_id is sourced from the subscription record (server-authoritative)
+ * rather than from client input to prevent spoofing.
+ */
+async function deliverRunsheetWebhook(
+  subscription: WebhookSubscription,
+  payload: WebhookPayload<unknown>
+): Promise<{
+  success: boolean;
+  statusCode?: number;
+  responseBody?: string;
+  error?: string;
+  duration: number;
+}> {
+  const startTime = Date.now();
+
+  // Build Runsheet envelope — tenant_id comes from the subscription record
+  const tenantId = subscription.tenantId ?? subscription.partnerId;
+  const data = (payload.data ?? {}) as Record<string, unknown>;
+  const envelope = buildRunsheetBody(payload.id, payload.type, tenantId, data);
+
+  const raw = JSON.stringify(envelope);
+  const sig = signRunsheet(raw, subscription.secret);
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+
+    const response = await fetch(subscription.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Dinee-Signature": sig,
+        "User-Agent": "Dinee-Webhook/1.0",
+      },
+      body: raw,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    const duration = Date.now() - startTime;
+    let responseBody: string | undefined;
+
+    try {
+      responseBody = await response.text();
+    } catch {
+      // Ignore response body read errors
+    }
+
+    return {
+      success: response.ok,
+      statusCode: response.status,
+      responseBody,
+      duration,
+    };
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+    if (errorMessage.includes("abort")) {
+      return {
+        success: false,
+        statusCode: 408,
+        error: "Request timeout",
+        duration,
+      };
+    }
+
     return {
       success: false,
       statusCode: 0,

@@ -239,6 +239,18 @@ export interface WebhookSubscription {
   events: WebhookEventType[];
   /** Whether the subscription is active */
   isActive: boolean;
+  /**
+   * Delivery mode.
+   * - "partner" (default): existing behaviour — X-Webhook-Signature with timestamp prefix
+   * - "runsheet": Runsheet envelope with X-Dinee-Signature (raw HMAC, no timestamp)
+   */
+  mode?: "partner" | "runsheet";
+  /**
+   * Authoritative tenant ID attached to this subscription.
+   * Used by runsheet mode to stamp tenant_id in the envelope
+   * from server context rather than client input.
+   */
+  tenantId?: string;
   /** When the subscription was created */
   createdAt: number;
 }

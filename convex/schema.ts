@@ -382,6 +382,10 @@ export default defineSchema({
     events: v.array(v.string()),
     secret: v.string(),
     isActive: v.boolean(),
+    // Delivery mode: "partner" (default) or "runsheet"
+    mode: v.optional(v.union(v.literal("partner"), v.literal("runsheet"))),
+    // Authoritative tenant ID for runsheet envelope stamping
+    tenantId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
