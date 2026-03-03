@@ -32,6 +32,8 @@ interface UpdateWebhookRequest {
   url?: string;
   events?: WebhookEventType[];
   isActive?: boolean;
+  mode?: "partner" | "runsheet";
+  tenantId?: string;
 }
 
 // ============================================================================
@@ -45,6 +47,11 @@ const VALID_EVENTS: WebhookEventType[] = [
   'order.cancelled',
   'call.started',
   'call.ended',
+  'shipment.created',
+  'shipment.assigned',
+  'shipment.status_updated',
+  'shipment.delivered',
+  'shipment.failed',
 ];
 
 // ============================================================================
@@ -271,6 +278,8 @@ export async function PATCH(
       url: body.url,
       events: body.events,
       isActive: body.isActive,
+      mode: body.mode,
+      tenantId: body.tenantId,
     });
     
     // Get the updated subscription

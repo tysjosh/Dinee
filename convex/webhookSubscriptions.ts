@@ -103,6 +103,8 @@ export const createWebhookSubscription = mutation({
     url: v.string(),
     events: v.array(v.string()),
     secret: v.string(),
+    mode: v.optional(v.union(v.literal("partner"), v.literal("runsheet"))),
+    tenantId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -113,6 +115,8 @@ export const createWebhookSubscription = mutation({
       events: args.events,
       secret: args.secret,
       isActive: true,
+      mode: args.mode,
+      tenantId: args.tenantId,
       createdAt: now,
       updatedAt: now,
     });
@@ -130,6 +134,8 @@ export const updateWebhookSubscription = mutation({
     url: v.optional(v.string()),
     events: v.optional(v.array(v.string())),
     isActive: v.optional(v.boolean()),
+    mode: v.optional(v.union(v.literal("partner"), v.literal("runsheet"))),
+    tenantId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const subscription = await ctx.db
@@ -145,6 +151,8 @@ export const updateWebhookSubscription = mutation({
     if (args.url !== undefined) updates.url = args.url;
     if (args.events !== undefined) updates.events = args.events;
     if (args.isActive !== undefined) updates.isActive = args.isActive;
+    if (args.mode !== undefined) updates.mode = args.mode;
+    if (args.tenantId !== undefined) updates.tenantId = args.tenantId;
 
     await ctx.db.patch(subscription._id, updates);
     return subscription._id;

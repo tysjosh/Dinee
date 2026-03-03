@@ -33,6 +33,8 @@ interface WebhookSubscriptionResponse {
 interface CreateWebhookRequest {
   url: string;
   events: WebhookEventType[];
+  mode?: "partner" | "runsheet";
+  tenantId?: string;
 }
 
 // ============================================================================
@@ -46,6 +48,11 @@ const VALID_EVENTS: WebhookEventType[] = [
   'order.cancelled',
   'call.started',
   'call.ended',
+  'shipment.created',
+  'shipment.assigned',
+  'shipment.status_updated',
+  'shipment.delivered',
+  'shipment.failed',
 ];
 
 // ============================================================================
@@ -238,6 +245,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiSucces
       url: body.url,
       events: body.events,
       secret,
+      mode: body.mode,
+      tenantId: body.tenantId,
     });
     
     // Add rate limit headers

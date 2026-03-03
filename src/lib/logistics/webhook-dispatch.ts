@@ -116,6 +116,8 @@ export async function dispatchLogisticsWebhookEvent(
         secret: s.secret,
         events: s.events as WebhookEventType[],
         isActive: s.isActive,
+        mode: (s.mode ?? "partner") as "partner" | "runsheet",
+        tenantId: s.tenantId,
         createdAt: s.createdAt,
       }));
 
