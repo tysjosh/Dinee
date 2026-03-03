@@ -37,10 +37,20 @@ export interface IdempotencyProceed {
   replay: false;
 }
 
+/**
+ * Returned when a previous attempt with this key stored a "failed" state.
+ * Signals the caller to re-execute the mutation rather than replaying the error.
+ * @requirements 3.8, 3.9
+ */
+export interface IdempotencyFailed {
+  failed: true;
+}
+
 export type IdempotencyCheckResult =
   | IdempotencyReplay
   | IdempotencyMismatch
-  | IdempotencyProceed;
+  | IdempotencyProceed
+  | IdempotencyFailed;
 
 // ============================================================================
 // Helpers
@@ -82,6 +92,11 @@ export async function checkIdempotency(
     return { replay: false };
   }
 
+  // Req 3.8, 3.9: If previous attempt failed, allow re-execution
+  if (existing.status === "failed") {
+    return { failed: true };
+  }
+
   if (existing.requestHash === requestHash) {
     return {
       replay: true,
@@ -115,5 +130,36 @@ export async function storeIdempotencyResult(
   await convexClient.mutation(
     api.logistics.idempotencyKeys.storeIdempotencyKey,
     { key, partnerId, requestHash, responseStatus: status, responseBody: body }
+  );
+}
+
+/**
+ * Store a failed idempotency state so that retries re-execute the mutation
+ * instead of replaying the error.
+ *
+ * @param convexClient - Convex HTTP client
+ * @param key - The idempotency key from the request header
+ * @param partnerId - Scoped partner identifier
+ * @param requestHash - SHA-256 hash of the original request body
+ * @param error - Error message describing the failure
+ * @requirements 3.8, 3.9
+ */
+export async function storeIdempotencyFailure(
+  convexClient: ConvexHttpClient,
+  key: string,
+  partnerId: string,
+  requestHash: string,
+  error: string
+): Promise<void> {
+  await convexClient.mutation(
+    api.logistics.idempotencyKeys.storeIdempotencyKey,
+    {
+      key,
+      partnerId,
+      requestHash,
+      responseStatus: 500,
+      responseBody: JSON.stringify({ error }),
+      status: "failed",
+    }
   );
 }

@@ -31,6 +31,13 @@ export interface LogisticsWebhookEventInput {
   payload: string;
   /** Correlation request ID for end-to-end traceability (Req 22.6) */
   requestId: string;
+  /**
+   * Voice session correlation ID (Req 17.5, 17.11, 17.12).
+   * When present (voice-originated), both requestId and correlationId are
+   * included in the webhook payload. When absent (API-originated), only
+   * requestId is included.
+   */
+  correlationId?: string;
 }
 
 export interface WebhookDispatchResult {
@@ -112,14 +119,22 @@ export async function dispatchLogisticsWebhookEvent(
         createdAt: s.createdAt,
       }));
 
-      // Build delivery payload with requestId for traceability (Req 22.6)
+      // Build standardized envelope payload (Req 18.1–18.6)
+      // Envelope: eventId, eventType, resourceType, resourceId, shipmentId, timestamp, requestId
+      // Event-specific details wrapped in `data` object (Req 18.2)
+      // Req 17.11: Voice-originated webhooks include both requestId and correlationId
+      // Req 17.12: API-originated webhooks include requestId only (no correlationId)
       const eventPayload = JSON.parse(input.payload);
-      const dataWithRequestId = {
-        ...eventPayload,
-        requestId: input.requestId,
-        shipmentId: input.shipmentId,
+      const dataWithRequestId: Record<string, unknown> = {
+        eventId,
+        eventType: input.eventType,
         resourceType: "shipment",
         resourceId: input.shipmentId,
+        shipmentId: input.shipmentId,
+        timestamp: Date.now(),
+        requestId: input.correlationId || input.requestId,
+        ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+        data: eventPayload,
       };
 
       const deliveries = await dispatchEvent(

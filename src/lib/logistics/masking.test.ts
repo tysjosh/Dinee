@@ -1,111 +1,94 @@
 /**
- * Property-Based Test — PII Masking Utilities
+ * Unit Tests — maskShipmentForPublic
  *
- * **Validates: Requirements 26.1, 26.2**
+ * **Validates: Requirements 12.1, 12.2, 12.6, 12.7, 12.8, 12.9**
  *
- * Property 2: PII masking never leaks sensitive data
- * - For all phone strings of length >= 4: maskPhone output contains only `*` and last 4 digits
- * - For all address objects: maskAddress output contains no street address, building, or apartment fields
+ * Verifies that maskShipmentForPublic constructs a new object with only
+ * allowed fields (field removal, not masking/redaction).
  */
 import { describe, it, expect } from 'vitest';
-import fc from 'fast-check';
-import { type Address, maskPhone, maskAddress } from './masking';
+import { maskShipmentForPublic, type PublicTrackingResponse } from './masking';
 
-const addressArb: fc.Arbitrary<Address> = fc.record({
-  name: fc.string({ minLength: 1 }),
-  phone: fc.string({ minLength: 1 }),
-  address: fc.string({ minLength: 1 }),
-  city: fc.string({ minLength: 1 }),
-  state: fc.string({ minLength: 1 }),
-  lat: fc.option(fc.double({ min: -90, max: 90, noNaN: true }), { nil: undefined }),
-  lng: fc.option(fc.double({ min: -180, max: 180, noNaN: true }), { nil: undefined }),
-});
+/** Minimal shipment-like object matching the ShipmentDoc shape */
+function makeShipment(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: 'test_id' as never,
+    _creationTime: Date.now(),
+    shipmentId: 'SHP-001',
+    trackingCode: 'LG12345678',
+    organizationId: 'org-001',
+    customerId: 'cust-001',
+    sender: { name: 'Alice', phone: '08012345678', address: '123 Main St', city: 'Lagos', state: 'Lagos' },
+    recipient: { name: 'Bob', phone: '09087654321', address: '456 Oak Ave', city: 'Abuja', state: 'FCT' },
+    parcel: { type: 'document' as const, weightKg: 2 },
+    serviceType: 'same_day' as const,
+    paymentMethod: 'paystack' as const,
+    paymentStatus: 'paid' as const,
+    deliveryStatus: 'in_transit' as const,
+    assignedRiderId: 'rider-001',
+    etaMinutes: 30,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  } as never;
+}
 
-describe('PII Masking — Property Tests', () => {
-  /**
-   * **Validates: Requirements 26.1**
-   *
-   * For all phone strings of length >= 4: output starts with "****" and
-   * ends with the last 4 characters of the input.
-   */
-  it('maskPhone starts with "****" and ends with last 4 chars for phones >= 4 chars', () => {
-    fc.assert(
-      fc.property(fc.string({ minLength: 4 }), (phone) => {
-        const masked = maskPhone(phone);
-        const last4 = phone.slice(-4);
-        expect(masked.startsWith('****')).toBe(true);
-        expect(masked.endsWith(last4)).toBe(true);
-      }),
-      { numRuns: 200 }
-    );
+describe('maskShipmentForPublic', () => {
+  it('returns only allowed fields from a full shipment', () => {
+    const shipment = makeShipment();
+    const result: PublicTrackingResponse = maskShipmentForPublic(shipment);
+
+    expect(result).toEqual({
+      trackingCode: 'LG12345678',
+      deliveryStatus: 'in_transit',
+      serviceType: 'same_day',
+      etaMinutes: 30,
+    });
   });
 
-  /**
-   * **Validates: Requirements 26.1**
-   *
-   * For all phone strings of length >= 4: output length is exactly 4 (asterisks) + 4 (last digits) = 8.
-   */
-  it('maskPhone output length is exactly 8 for phones >= 4 chars', () => {
-    fc.assert(
-      fc.property(fc.string({ minLength: 4 }), (phone) => {
-        const masked = maskPhone(phone);
-        expect(masked.length).toBe(8);
-      }),
-      { numRuns: 200 }
-    );
+  it('excludes all PII and internal fields', () => {
+    const shipment = makeShipment();
+    const result = maskShipmentForPublic(shipment);
+    const keys = Object.keys(result);
+
+    const forbiddenKeys = [
+      'sender', 'recipient', 'organizationId', 'assignedRiderId',
+      'paymentMethod', 'paymentStatus', 'customerId', 'shipmentId',
+      'parcel', 'proofOfDelivery', 'failureReason', 'locationId',
+      '_id', '_creationTime', 'createdAt', 'updatedAt',
+    ];
+
+    for (const key of forbiddenKeys) {
+      expect(keys).not.toContain(key);
+    }
   });
 
-  /**
-   * **Validates: Requirements 26.1**
-   *
-   * For all phone strings of length < 4: output is all asterisks of the same length.
-   */
-  it('maskPhone returns all asterisks for phones < 4 chars', () => {
-    fc.assert(
-      fc.property(fc.string({ minLength: 0, maxLength: 3 }), (phone) => {
-        const masked = maskPhone(phone);
-        expect(masked).toBe('*'.repeat(phone.length));
-      }),
-      { numRuns: 200 }
-    );
+  it('omits etaMinutes when not present on shipment', () => {
+    const shipment = makeShipment({ etaMinutes: undefined });
+    const result = maskShipmentForPublic(shipment);
+
+    expect(result).not.toHaveProperty('etaMinutes');
   });
 
-  /**
-   * **Validates: Requirements 26.2**
-   *
-   * For all address objects: maskAddress output has only city and state,
-   * no name, phone, address, lat, or lng fields.
-   */
-  it('maskAddress output contains only city and state, no sensitive fields', () => {
-    fc.assert(
-      fc.property(addressArb, (addr) => {
-        const masked = maskAddress(addr);
-        const keys = Object.keys(masked);
-        expect(keys).toEqual(expect.arrayContaining(['city', 'state']));
-        expect(keys).toHaveLength(2);
-        expect(masked).not.toHaveProperty('name');
-        expect(masked).not.toHaveProperty('phone');
-        expect(masked).not.toHaveProperty('address');
-        expect(masked).not.toHaveProperty('lat');
-        expect(masked).not.toHaveProperty('lng');
-      }),
-      { numRuns: 200 }
-    );
+  it('includes lastEventTimestamp when provided', () => {
+    const shipment = makeShipment();
+    const ts = 1700000000;
+    const result = maskShipmentForPublic(shipment, ts);
+
+    expect(result.lastEventTimestamp).toBe(ts);
   });
 
-  /**
-   * **Validates: Requirements 26.2**
-   *
-   * For all address objects: maskAddress output city and state match the input.
-   */
-  it('maskAddress preserves city and state from input', () => {
-    fc.assert(
-      fc.property(addressArb, (addr) => {
-        const masked = maskAddress(addr);
-        expect(masked.city).toBe(addr.city);
-        expect(masked.state).toBe(addr.state);
-      }),
-      { numRuns: 200 }
-    );
+  it('omits lastEventTimestamp when not provided', () => {
+    const shipment = makeShipment();
+    const result = maskShipmentForPublic(shipment);
+
+    expect(result).not.toHaveProperty('lastEventTimestamp');
+  });
+
+  it('omits lastEventTimestamp when explicitly undefined', () => {
+    const shipment = makeShipment();
+    const result = maskShipmentForPublic(shipment, undefined);
+
+    expect(result).not.toHaveProperty('lastEventTimestamp');
   });
 });

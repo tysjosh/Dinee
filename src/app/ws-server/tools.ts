@@ -12,12 +12,16 @@ interface CallData {
   phoneNumber?: string | null;
   status?: "active" | "completed";
   orderId?: string;
+  /** Req 17.7: Voice session correlation ID */
+  correlationId?: string;
 }
 
 interface TranscriptData {
   callId: string | null;
   dialogue: string;
   speaker: "ai" | "human";
+  /** Req 17.9: Voice session correlation ID */
+  correlationId?: string;
 }
 
 interface OrderItem {

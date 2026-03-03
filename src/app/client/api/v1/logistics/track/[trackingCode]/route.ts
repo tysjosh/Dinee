@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../../convex/_generated/api';
-import { maskPhone, maskAddress } from '@/lib/logistics/masking';
+import { maskShipmentForPublic } from '@/lib/logistics/masking';
 import { isLogisticsEnabled } from '@/lib/logistics/feature-gate';
 import { getOrCreateRequestId } from '@/lib/logistics/correlation';
 
@@ -93,7 +93,7 @@ export async function GET(
 
     if (!shipment) {
       return NextResponse.json(
-        { error: 'Not Found', message: `No shipment found for tracking code: ${trackingCode}` },
+        { error: 'Not Found', message: 'Tracking information not found' },
         { status: 404, headers: { 'X-Request-Id': requestId } }
       );
     }
@@ -122,30 +122,15 @@ export async function GET(
 
     const lastEvent = events.length > 0 ? events[events.length - 1] : null;
 
-    // 6. Apply PII masking on sender/recipient for logging (not returned in response)
-    // Response only includes safe fields — no sender/recipient details at all
-    const maskedSender = {
-      phone: maskPhone(shipment.sender.phone),
-      ...maskAddress(shipment.sender),
-    };
-    const maskedRecipient = {
-      phone: maskPhone(shipment.recipient.phone),
-      ...maskAddress(shipment.recipient),
-    };
+    // 6. Apply maskShipmentForPublic to strip all PII fields (Req 12.6)
+    const lastEventTimestamp = lastEvent?.createdAt ?? undefined;
+    const publicData = maskShipmentForPublic(shipment, lastEventTimestamp);
 
     // 7. Return only safe fields
     return NextResponse.json(
       {
         success: true,
-        data: {
-          trackingCode: shipment.trackingCode,
-          deliveryStatus: shipment.deliveryStatus,
-          serviceType: shipment.serviceType,
-          etaMinutes: shipment.etaMinutes ?? null,
-          lastEventAt: lastEvent?.createdAt ?? null,
-          sender: maskedSender,
-          recipient: maskedRecipient,
-        },
+        data: publicData,
       },
       {
         status: 200,

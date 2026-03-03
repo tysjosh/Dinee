@@ -15,4 +15,16 @@ crons.interval(
   internal.logistics.idempotencyKeys.cleanupExpiredKeys
 );
 
+/**
+ * Process pending webhook delivery retries every 60 seconds.
+ * Queries by_next_retry_at index, attempts re-delivery, updates records.
+ *
+ * Requirements: 20.7
+ */
+crons.interval(
+  "process webhook retries",
+  { seconds: 60 },
+  internal.webhookDeliveries.processRetries
+);
+
 export default crons;

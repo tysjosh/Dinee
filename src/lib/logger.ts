@@ -6,6 +6,12 @@ interface LogContext {
   orderId?: string;
   partnerId?: string;
   eventId?: string;
+  correlationId?: string;  // Voice session correlation (Req 17.10)
+  tenantId?: string;       // X-Tenant-Id value (Req 4.2)
+  vertical?: string;       // "restaurant" | "logistics" (Req 4.2)
+  endpoint?: string;       // Request path (Req 4.2)
+  method?: string;         // HTTP method (Req 4.2)
+  resourceId?: string;     // shipmentId, riderId, etc. (Req 4.2)
   [key: string]: unknown;
 }
 

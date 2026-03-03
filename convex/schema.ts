@@ -137,6 +137,8 @@ export default defineSchema({
     fallbackTriggered: v.optional(v.boolean()), // Whether fallback was triggered
     // Logistics vertical: vertical discriminator
     vertical: v.optional(verticalValidator),
+    // Req 17.7: Voice session correlation ID for end-to-end tracing (Req 7.1: v.optional for backward compat)
+    correlationId: v.optional(v.string()),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -247,7 +249,9 @@ export default defineSchema({
   transcripts: defineTable({
     callId: v.string(),
     dialogue: v.string(),
-    speaker: v.union(v.literal("human"), v.literal("ai"))
+    speaker: v.union(v.literal("human"), v.literal("ai")),
+    // Req 17.9: Voice session correlation ID for end-to-end tracing (Req 7.1: v.optional for backward compat)
+    correlationId: v.optional(v.string()),
   })
     .index("by_call_id", ["callId"]),
 
@@ -401,7 +405,8 @@ export default defineSchema({
   })
     .index("by_delivery_id", ["deliveryId"])
     .index("by_subscription_id", ["subscriptionId"])
-    .index("by_success", ["success"]),
+    .index("by_success", ["success"])
+    .index("by_next_retry_at", ["nextRetryAt"]),
 
   // Partner API - API Usage Logs
   apiUsageLogs: defineTable({
@@ -862,7 +867,8 @@ export default defineSchema({
     .index("by_tracking_code", ["trackingCode"])
     .index("by_organization_id", ["organizationId"])
     .index("by_delivery_status", ["deliveryStatus"])
-    .index("by_assigned_rider_id", ["assignedRiderId"]),
+    .index("by_assigned_rider_id", ["assignedRiderId"])
+    .index("by_org_and_status", ["organizationId", "deliveryStatus"]),
 
   // Logistics: Riders (delivery personnel)
   // Requirements: 5.1, 5.2
@@ -893,6 +899,8 @@ export default defineSchema({
     actorType: actorTypeValidator,
     actorId: v.string(),
     payload: v.string(),
+    // Req 17.8: Voice session correlation ID for end-to-end tracing (Req 7.1: v.optional for backward compat)
+    correlationId: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_shipment_id", ["shipmentId"])
@@ -900,12 +908,17 @@ export default defineSchema({
 
   // Logistics: Idempotency Keys (replay protection for write endpoints)
   // Requirements: 21.1, 21.2, 21.5
+  // Req 3.8, 3.9: status field tracks mutation outcome for failed-state recovery
+  // Existing records without status are treated as "success" for backward compatibility (Req 7.1)
   idempotencyKeys: defineTable({
     key: v.string(),
     partnerId: v.string(),
     requestHash: v.string(),
     responseStatus: v.number(),
     responseBody: v.string(),
+    // Req 3.8, 3.9: Tracks whether the original mutation succeeded or failed.
+    // When "failed", retries re-execute the mutation instead of replaying the error.
+    status: v.optional(v.union(v.literal("success"), v.literal("failed"))),
     createdAt: v.number(),
     expiresAt: v.number(),
   })

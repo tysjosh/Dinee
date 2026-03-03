@@ -87,6 +87,8 @@ export const upsertCallData = mutation({
       phoneNumber: v.optional(v.string()),
       status: v.optional(v.union(v.literal("active"), v.literal("completed"))),
       orderId: v.optional(v.optional(v.string())),
+      // Req 17.7: Voice session correlation ID for end-to-end tracing
+      correlationId: v.optional(v.string()),
     })
   },
   handler: async (ctx, args) => {
@@ -135,6 +137,8 @@ export const addTranscript = mutation({
       callId: v.string(),
       dialogue: v.string(),
       speaker: v.union(v.literal("human"), v.literal("ai")),
+      // Req 17.9: Voice session correlation ID for end-to-end tracing
+      correlationId: v.optional(v.string()),
     })
   },
   handler: async (ctx, args) => {

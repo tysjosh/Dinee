@@ -19,9 +19,12 @@ import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { authorizeLogisticsAccess } from '@/lib/logistics/authorization';
 import { isLogisticsEnabled } from '@/lib/logistics/feature-gate';
 import { getOrCreateRequestId } from '@/lib/logistics/correlation';
-import { checkIdempotency, storeIdempotencyResult, hashRequestBody } from '@/lib/logistics/idempotency';
+import { checkIdempotency, storeIdempotencyResult, storeIdempotencyFailure, hashRequestBody } from '@/lib/logistics/idempotency';
 import { dispatchLogisticsWebhookEvent } from '@/lib/logistics/webhook-dispatch';
+import { createLogger } from '@/lib/logger';
 import type { ApiErrorResponse } from '@/lib/partner-api/types';
+
+const logger = createLogger('logistics-api');
 
 // ============================================================================
 // Constants
@@ -66,6 +69,8 @@ export async function POST(
 ): Promise<NextResponse> {
   const { shipmentId } = await params;
   const requestId = getOrCreateRequestId(request.headers);
+  // Req 17.3: Read correlationId from voice-originated requests
+  const correlationId = request.headers.get('X-Correlation-Id') || undefined;
 
   // 1. Auth
   const validation = await validateApiRequest(request, {
@@ -86,8 +91,21 @@ export async function POST(
     );
   }
 
+  // Track these outside try for catch block access (Req 3.8)
+  let bodyHash: string | undefined;
+  let parsedIdempotencyKey: string | null = null;
+
   try {
-    // 2. Feature gate — look up partner to get platformId
+    // 2. Require X-Tenant-Id header (Req 2.1, 2.5)
+    const tenantId = request.headers.get('X-Tenant-Id');
+    if (!tenantId) {
+      return NextResponse.json(
+        { error: 'X-Tenant-Id header is required' },
+        { status: 400, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 3. Feature gate — look up partner to get platformId
     const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
       partnerId: context.partnerId,
     });
@@ -107,9 +125,21 @@ export async function POST(
       );
     }
 
-    // 3. Parse body
+    // 4. Authorization — verify partner owns the organization via X-Tenant-Id (Req 2.6, 2.7)
+    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, tenantId);
+    if (!authz.authorized) {
+      return NextResponse.json(
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { status: 403, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 5. Parse body
     const body = await request.json();
     const { newStatus, failureReason, proofOfDelivery, actorType, actorId } = body;
+
+    // Compute request hash early so it's available in the catch block for failed idempotency storage
+    bodyHash = hashRequestBody(body);
 
     if (!newStatus) {
       return NextResponse.json(
@@ -118,7 +148,7 @@ export async function POST(
       );
     }
 
-    // 4. Validate newStatus is a valid delivery status
+    // 6. Validate newStatus is a valid delivery status
     if (!VALID_DELIVERY_STATUSES.has(newStatus)) {
       return NextResponse.json(
         {
@@ -129,7 +159,7 @@ export async function POST(
       );
     }
 
-    // 5. Get shipment to find organizationId for authorization
+    // 7. Get shipment to verify it belongs to the tenant
     const shipment = await convexClient.query(api.logistics.shipments.getShipment, {
       shipmentId,
     });
@@ -141,19 +171,19 @@ export async function POST(
       );
     }
 
-    // 6. Authorization — verify partner owns the organization
-    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, shipment.organizationId);
-    if (!authz.authorized) {
+    // 8. Cross-validate shipment belongs to the tenant (Req 2.7)
+    if (shipment.organizationId !== tenantId) {
       return NextResponse.json(
-        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { error: 'Forbidden', message: 'Access denied' },
         { status: 403, headers: { 'X-Request-Id': requestId } }
       );
     }
 
-    // 7. Idempotency check
-    const idempotencyKey = request.headers.get('X-Idempotency-Key');
+    // 9. Idempotency check
+    parsedIdempotencyKey = request.headers.get('X-Idempotency-Key');
+    const idempotencyKey = parsedIdempotencyKey;
     if (idempotencyKey) {
-      const reqHash = hashRequestBody(body);
+      const reqHash = bodyHash;
       const idempotencyResult = await checkIdempotency(
         convexClient,
         idempotencyKey,
@@ -181,9 +211,32 @@ export async function POST(
           },
         });
       }
+
+      // Req 3.8, 3.9: If previous attempt failed, re-execute the mutation
+      if ('failed' in idempotencyResult && idempotencyResult.failed) {
+        logger.info('Re-executing previously failed idempotent request', {
+          tenantId,
+          vertical: 'logistics',
+          endpoint: `/api/v1/logistics/shipments/${shipmentId}/status`,
+          method: 'POST',
+          requestId,
+          correlationId,
+        });
+      }
     }
 
-    // 8. Call updateShipmentStatus mutation
+    // Req 4.1, 4.2: Audit log for status update request
+    logger.info('Shipment status update request', {
+      tenantId,
+      vertical: 'logistics',
+      endpoint: `/api/v1/logistics/shipments/${shipmentId}/status`,
+      method: 'POST',
+      resourceId: shipmentId,
+      requestId,
+      correlationId,
+    });
+
+    // 10. Call updateShipmentStatus mutation
     const result = await convexClient.mutation(api.logistics.shipments.updateShipmentStatus, {
       shipmentId,
       newStatus,
@@ -191,6 +244,8 @@ export async function POST(
       ...(proofOfDelivery ? { proofOfDelivery } : {}),
       ...(actorType ? { actorType } : {}),
       ...(actorId ? { actorId } : {}),
+      // Req 17.8: Propagate correlationId to shipment events via mutation
+      ...(correlationId ? { correlationId } : {}),
     });
 
     const responseBody = JSON.stringify({
@@ -202,20 +257,19 @@ export async function POST(
       },
     });
 
-    // 9. Store idempotency result
+    // 11. Store idempotency result
     if (idempotencyKey) {
-      const reqHash = hashRequestBody(body);
       await storeIdempotencyResult(
         convexClient,
         idempotencyKey,
         context.partnerId,
-        reqHash,
+        bodyHash,
         200,
         responseBody
       );
     }
 
-    // 10. Dispatch webhook — use specific event type based on new status
+    // 12. Dispatch webhook — use specific event type based on new status
     const webhookEventType = getWebhookEventType(newStatus);
     await dispatchLogisticsWebhookEvent(convexClient, {
       shipmentId: result.shipmentId,
@@ -228,9 +282,11 @@ export async function POST(
         ...(failureReason ? { failureReason } : {}),
       }),
       requestId,
+      // Req 17.5: Propagate correlationId to webhook payloads for voice-originated requests
+      correlationId,
     });
 
-    // 11. Return 200
+    // 13. Return 200
     return new NextResponse(responseBody, {
       status: 200,
       headers: {
@@ -243,6 +299,15 @@ export async function POST(
 
     // Handle invalid transition errors (422)
     if (message.startsWith('Invalid status transition:')) {
+      logger.warn('Invalid status transition rejected', {
+        tenantId: request.headers.get('X-Tenant-Id') || undefined,
+        vertical: 'logistics',
+        endpoint: `/api/v1/logistics/shipments/${shipmentId}/status`,
+        method: 'POST',
+        resourceId: shipmentId,
+        requestId,
+        correlationId,
+      });
       return NextResponse.json(
         { error: 'Unprocessable Entity', message },
         { status: 422, headers: { 'X-Request-Id': requestId } }
@@ -268,7 +333,21 @@ export async function POST(
       );
     }
 
-    console.error('Logistics API: Error updating shipment status:', error);
+    // Req 3.8: Store failed idempotency state on unexpected errors
+    if (parsedIdempotencyKey && bodyHash) {
+      await storeIdempotencyFailure(convexClient, parsedIdempotencyKey, context.partnerId, bodyHash, message).catch(() => {});
+    }
+
+    logger.error('Shipment status update failed', {
+      tenantId: request.headers.get('X-Tenant-Id') || undefined,
+      vertical: 'logistics',
+      endpoint: `/api/v1/logistics/shipments/${shipmentId}/status`,
+      method: 'POST',
+      resourceId: shipmentId,
+      requestId,
+      correlationId,
+      error: message,
+    });
     return NextResponse.json(
       { error: 'Internal Server Error', message: 'Failed to update shipment status' },
       { status: 500, headers: { 'X-Request-Id': requestId } }

@@ -57,7 +57,16 @@ export async function GET(
   }
 
   try {
-    // 2. Feature gate — look up partner to get platformId
+    // 2. Require X-Tenant-Id header (Req 2.1, 2.5)
+    const tenantId = request.headers.get('X-Tenant-Id');
+    if (!tenantId) {
+      return NextResponse.json(
+        { error: 'X-Tenant-Id header is required' },
+        { status: 400, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 3. Feature gate — look up partner to get platformId
     const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
       partnerId: context.partnerId,
     });
@@ -77,7 +86,16 @@ export async function GET(
       );
     }
 
-    // 3. Query shipment
+    // 4. Authorization — verify partner owns the organization via X-Tenant-Id (Req 2.6, 2.7)
+    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, tenantId);
+    if (!authz.authorized) {
+      return NextResponse.json(
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { status: 403, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 5. Query shipment
     const shipment = await convexClient.query(api.logistics.shipments.getShipment, {
       shipmentId,
     });
@@ -89,16 +107,15 @@ export async function GET(
       );
     }
 
-    // 4. Authorization — verify partner owns the organization
-    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, shipment.organizationId);
-    if (!authz.authorized) {
+    // 6. Cross-validate shipment belongs to the tenant (Req 2.7)
+    if (shipment.organizationId !== tenantId) {
       return NextResponse.json(
-        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { error: 'Forbidden', message: 'Access denied' },
         { status: 403, headers: { 'X-Request-Id': requestId } }
       );
     }
 
-    // 5. Return 200
+    // 7. Return 200
     return NextResponse.json(
       {
         success: true,

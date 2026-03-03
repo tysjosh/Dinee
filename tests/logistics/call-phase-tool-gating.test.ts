@@ -39,12 +39,19 @@ const SHIPMENT_MUTATION_TOOLS: string[] = [
   "add_shipment_event",
 ];
 
-/** The ground-truth allowed tools map, mirroring the source module. */
+/** The ground-truth allowed tools map, mirroring the cumulative source matrix (Req 14.8). */
 const ALLOWED_TOOLS: Record<LogisticsCallPhase, Set<string>> = {
   await_org_verification: new Set(["get_organization_details"]),
-  org_verified: new Set(["create_shipment", "quote_delivery"]),
-  shipment_open: new Set(["update_shipment", "assign_rider", "add_shipment_event"]),
-  shipment_confirmed: new Set(["add_shipment_event"]),
+  org_verified: new Set(["get_organization_details", "create_shipment", "quote_delivery"]),
+  shipment_open: new Set([
+    "get_organization_details",
+    "create_shipment",
+    "quote_delivery",
+    "update_shipment",
+    "assign_rider",
+    "add_shipment_event",
+  ]),
+  shipment_confirmed: new Set(["get_organization_details", "quote_delivery"]),
 };
 
 const phaseArb = fc.constantFrom(...ALL_PHASES);

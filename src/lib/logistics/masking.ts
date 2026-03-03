@@ -1,42 +1,39 @@
 /**
- * PII masking utilities for logistics public-facing responses and logs.
- * Requirements: 26.1, 26.2, 26.3, 26.5
+ * PII masking utilities for logistics public-facing responses.
+ * Uses field REMOVAL (constructing a new object with only allowed fields)
+ * rather than field masking/redaction, eliminating any risk of partial exposure.
+ * Requirements: 12.1, 12.2, 12.6, 12.7, 12.8, 12.9
  */
 
-export interface Address {
-  name: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  lat?: number;
-  lng?: number;
-}
+import { Doc } from "convex/_generated/dataModel";
 
-export interface MaskedAddress {
-  city: string;
-  state: string;
-}
+export type ShipmentDoc = Doc<"shipments">;
 
-/**
- * Masks a phone number, showing only the last 4 digits.
- * If the phone has fewer than 4 characters, returns all asterisks.
- * Example: "08012345678" → "****5678"
- */
-export function maskPhone(phone: string): string {
-  if (phone.length < 4) {
-    return "*".repeat(phone.length);
-  }
-  return "****" + phone.slice(-4);
+export interface PublicTrackingResponse {
+  trackingCode: string;
+  deliveryStatus: string;
+  serviceType: string;
+  etaMinutes?: number;
+  lastEventTimestamp?: number;
 }
 
 /**
- * Masks an address, returning only city and state.
- * Strips name, phone, street address, and coordinates.
+ * Strips all PII and internal fields from a shipment document.
+ * REMOVES (not masks): sender.phone, sender.address, recipient.phone,
+ * recipient.address, organizationId, assignedRiderId, paymentMethod,
+ * paymentStatus, customerId.
+ * RETAINS: trackingCode, deliveryStatus, serviceType, etaMinutes,
+ * lastEventTimestamp.
  */
-export function maskAddress(addr: Address): MaskedAddress {
+export function maskShipmentForPublic(
+  shipment: ShipmentDoc,
+  lastEventTimestamp?: number
+): PublicTrackingResponse {
   return {
-    city: addr.city,
-    state: addr.state,
+    trackingCode: shipment.trackingCode,
+    deliveryStatus: shipment.deliveryStatus,
+    serviceType: shipment.serviceType,
+    ...(shipment.etaMinutes != null && { etaMinutes: shipment.etaMinutes }),
+    ...(lastEventTimestamp != null && { lastEventTimestamp }),
   };
 }

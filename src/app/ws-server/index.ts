@@ -40,6 +40,7 @@ import {
 } from "./logistics-tools.ts";
 import twilio from "twilio";
 import { createLogger } from "../../lib/logger.ts";
+import { generateCorrelationId } from "../../lib/logistics/correlation.ts";
 
 const logger = createLogger("ws-server");
 
@@ -203,6 +204,9 @@ fastify.register(async (fastify) => {
 
     // Logistics call phase state machine (used when isLogistics === true)
     let logisticsPhase: LogisticsCallPhase = "await_org_verification";
+
+    // Req 17.1: Generate a unique correlationId for voice sessions
+    const correlationId = isLogistics ? generateCorrelationId() : undefined;
 
     // OpenAI socket
     const oaWs = new WebSocket(
@@ -511,8 +515,20 @@ fastify.register(async (fastify) => {
       );
 
     // Helper function to save transcript if restaurant ID is confirmed
+    // For logistics calls, saves with correlationId (Req 17.9)
     const saveTranscriptIfConfirmed = async (dialogue: string, speaker: 'human' | 'ai') => {
-      if (restaurantIdConfirmed && currentRestaurantId) {
+      if (isLogistics && correlationId) {
+        try {
+          await wrapperAddTranscriptDialogues({
+            dialogue,
+            speaker,
+            callId: callSid,
+            correlationId,
+          });
+        } catch (error) {
+          logger.error("Error saving logistics transcript", { callId: callSid, correlationId });
+        }
+      } else if (restaurantIdConfirmed && currentRestaurantId) {
         try {
           await wrapperAddTranscriptDialogues({
             dialogue,
@@ -607,6 +623,7 @@ fastify.register(async (fastify) => {
             output = { success: false, error: `Tool ${toolName} not allowed in phase ${logisticsPhase}` };
           } else {
             try {
+              // Req 17.2: Pass correlationId to all tool calls during the session
               switch (toolName) {
                 case "get_organization_details":
                   // Org lookup — for now return a stub; real implementation would query Convex
@@ -614,20 +631,20 @@ fastify.register(async (fastify) => {
                   logisticsPhase = nextLogisticsPhase(logisticsPhase, "org_verified");
                   break;
                 case "create_shipment":
-                  output = await wrapperCreateShipment(args) as Record<string, unknown>;
+                  output = await wrapperCreateShipment(args, correlationId) as Record<string, unknown>;
                   if (output.success) logisticsPhase = nextLogisticsPhase(logisticsPhase, "shipment_created");
                   break;
                 case "quote_delivery":
                   output = wrapperQuoteDelivery(args.sender, args.recipient, args.serviceType) as unknown as Record<string, unknown>;
                   break;
                 case "update_shipment":
-                  output = await wrapperUpdateShipment(args.shipmentId, args) as Record<string, unknown>;
+                  output = await wrapperUpdateShipment(args.shipmentId, args, correlationId) as Record<string, unknown>;
                   break;
                 case "assign_rider":
-                  output = await wrapperAssignRider(args.shipmentId, args.riderId) as Record<string, unknown>;
+                  output = await wrapperAssignRider(args.shipmentId, args.riderId, correlationId) as Record<string, unknown>;
                   break;
                 case "add_shipment_event":
-                  output = await wrapperAddShipmentEvent(args.shipmentId, args.eventType, args.payload || {}) as Record<string, unknown>;
+                  output = await wrapperAddShipmentEvent(args.shipmentId, args.eventType, args.payload || {}, correlationId) as Record<string, unknown>;
                   break;
               }
             } catch (e) {
@@ -759,7 +776,9 @@ fastify.register(async (fastify) => {
         callId: callSid,
         phoneNumber: fromNumber,
         status: "active",
-        restaurantId: "unknown"
+        restaurantId: "unknown",
+        // Req 17.7: Store correlationId on the calls table record for voice sessions
+        ...(correlationId && { correlationId }),
       });
       initializeSession();
       setTimeout(greet, 200);

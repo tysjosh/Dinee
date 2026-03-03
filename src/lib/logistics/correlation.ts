@@ -8,3 +8,14 @@ import { randomUUID } from "crypto";
 export function getOrCreateRequestId(headers: Headers): string {
   return headers.get("X-Request-Id") || randomUUID();
 }
+
+/**
+ * Generates a unique correlationId for voice call sessions.
+ * Used to trace all downstream records (call, transcripts, shipment events,
+ * audit logs, webhook payloads) back to a single voice session.
+ * Distinct from requestId used for API requests (Req 17.6).
+ */
+export function generateCorrelationId(): string {
+  return `voice-${randomUUID()}`;
+}
+

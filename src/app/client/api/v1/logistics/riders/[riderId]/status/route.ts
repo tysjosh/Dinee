@@ -65,7 +65,16 @@ export async function POST(
   }
 
   try {
-    // 2. Feature gate — look up partner to get platformId
+    // 2. Require X-Tenant-Id header (Req 2.1, 2.5)
+    const tenantId = request.headers.get('X-Tenant-Id');
+    if (!tenantId) {
+      return NextResponse.json(
+        { error: 'X-Tenant-Id header is required' },
+        { status: 400, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 3. Feature gate — look up partner to get platformId
     const partner = await convexClient.query(api.partners.getPartnerByPartnerId, {
       partnerId: context.partnerId,
     });
@@ -85,7 +94,16 @@ export async function POST(
       );
     }
 
-    // 3. Parse body
+    // 4. Authorization — verify partner owns the organization via X-Tenant-Id (Req 2.6, 2.7)
+    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, tenantId);
+    if (!authz.authorized) {
+      return NextResponse.json(
+        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { status: 403, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+
+    // 5. Parse body
     const body = await request.json();
     const { status, location } = body;
 
@@ -116,7 +134,7 @@ export async function POST(
       }
     }
 
-    // 4. Get rider to find organizationId for authorization
+    // 6. Get rider to verify it belongs to the tenant
     const rider = await convexClient.query(api.logistics.riders.getRider, {
       riderId,
     });
@@ -128,23 +146,22 @@ export async function POST(
       );
     }
 
-    // 5. Authorization — verify partner owns the rider's organization
-    const authz = await authorizeLogisticsAccess(convexClient, context.partnerId, rider.organizationId);
-    if (!authz.authorized) {
+    // 7. Cross-validate rider belongs to the tenant (Req 2.7)
+    if (rider.organizationId !== tenantId) {
       return NextResponse.json(
-        { error: 'Forbidden', message: authz.error ?? 'Access denied' },
+        { error: 'Forbidden', message: 'Access denied' },
         { status: 403, headers: { 'X-Request-Id': requestId } }
       );
     }
 
-    // 6. Call updateRiderStatus mutation
+    // 8. Call updateRiderStatus mutation
     const result = await convexClient.mutation(api.logistics.riders.updateRiderStatus, {
       riderId,
       status,
       ...(location ? { location } : {}),
     });
 
-    // 7. Return 200
+    // 9. Return 200
     return NextResponse.json(
       {
         success: true,

@@ -1,3 +1,7 @@
+import { createLogger } from "../../lib/logger";
+
+const logger = createLogger("logistics-call-phase");
+
 export type LogisticsCallPhase =
   | "await_org_verification"
   | "org_verified"
@@ -5,21 +9,41 @@ export type LogisticsCallPhase =
   | "shipment_confirmed";
 
 const ALLOWED_TOOLS: Record<LogisticsCallPhase, Set<string>> = {
-  await_org_verification: new Set(["get_organization_details"]),
-  org_verified: new Set(["create_shipment", "quote_delivery"]),
+  await_org_verification: new Set([
+    "get_organization_details",
+  ]),
+  org_verified: new Set([
+    "get_organization_details",
+    "create_shipment",
+    "quote_delivery",
+  ]),
   shipment_open: new Set([
+    "get_organization_details",
+    "create_shipment",
+    "quote_delivery",
     "update_shipment",
     "assign_rider",
     "add_shipment_event",
   ]),
-  shipment_confirmed: new Set(["add_shipment_event"]),
+  shipment_confirmed: new Set([
+    "get_organization_details",
+    "quote_delivery",
+    // No mutations — read-only only
+  ]),
 };
 
 export function isLogisticsToolAllowed(
   phase: LogisticsCallPhase,
   toolName: string
 ): boolean {
-  return ALLOWED_TOOLS[phase]?.has(toolName) ?? false;
+  const allowed = ALLOWED_TOOLS[phase]?.has(toolName) ?? false;
+  if (!allowed) {
+    logger.warn(`Tool "${toolName}" not permitted in phase "${phase}"`, {
+      vertical: "logistics",
+      resourceId: toolName,
+    });
+  }
+  return allowed;
 }
 
 export function nextLogisticsPhase(

@@ -89,40 +89,118 @@ const SERVICE_DEFAULTS: Record<string, { baseCostNGN: number; etaMinutes: number
 };
 
 // ============================================================================
+// Retry Logic (Req 16.1–16.6)
+// ============================================================================
+
+const TRANSIENT_ERROR_PATTERNS = [
+  "network",
+  "timeout",
+  "ECONNREFUSED",
+  "mutation conflict",
+  "rate limit",
+  "503",
+  "502",
+];
+
+/**
+ * Determines if an error is transient and eligible for retry.
+ * Validation errors (invalid input, unauthorized) are NOT transient.
+ * @requirements 16.6
+ */
+export function isTransientError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return TRANSIENT_ERROR_PATTERNS.some((p) =>
+    msg.toLowerCase().includes(p.toLowerCase())
+  );
+}
+
+/**
+ * Wraps an async operation with retry logic for transient errors.
+ * Max 2 retries with exponential backoff (1s, 3s).
+ * Logs retries at "warn" level, final failures at "error" level.
+ * @requirements 16.1, 16.2, 16.3, 16.4, 16.5
+ */
+export async function withRetry<T>(
+  toolName: string,
+  fn: () => Promise<T>,
+  maxRetries: number = 2,
+  backoffMs: number[] = [1000, 3000]
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientError(error) || attempt === maxRetries) {
+        logger.error(`Tool ${toolName} failed after ${attempt + 1} attempts`, {
+          toolName,
+          attempt: attempt + 1,
+          error: String(error),
+        } as Record<string, unknown>);
+        throw error;
+      }
+      logger.warn(`Tool ${toolName} retry attempt ${attempt + 1}`, {
+        toolName,
+        attempt: attempt + 1,
+        error: String(error),
+      } as Record<string, unknown>);
+      await new Promise((r) => setTimeout(r, backoffMs[attempt] ?? 3000));
+    }
+  }
+  throw lastError;
+}
+
+// ============================================================================
 // Tool Implementations
 // ============================================================================
 
 /**
  * Creates a new shipment via the logistics API.
  * Requirement 12.1
+ * @param data - Shipment creation data
+ * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
-export async function wrapperCreateShipment(data: CreateShipmentData): Promise<unknown> {
+export async function wrapperCreateShipment(data: CreateShipmentData, correlationId?: string): Promise<unknown> {
   if (!data.shipmentId || !data.organizationId || !data.sender || !data.recipient || !data.parcel || !data.serviceType) {
     return { success: false, error: "Missing required fields: shipmentId, organizationId, sender, recipient, parcel, serviceType" };
   }
 
   try {
-    const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments`, {
-      method: "POST",
-      headers: {
+    const result = await withRetry("create_shipment", async () => {
+      const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": process.env.INTERNAL_API_KEY || "",
-      },
-      body: JSON.stringify(data),
+      };
+      // Req 17.3: Propagate correlationId to downstream API for shipment events and webhooks
+      if (correlationId) headers["X-Correlation-Id"] = correlationId;
+
+      const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(data),
+      });
+      return await response.json();
     });
-    const result = await response.json();
+    // Req 17.10: Include correlationId in audit log entries during voice tool execution
+    if (correlationId) {
+      logger.info("Voice tool: create_shipment completed", { shipmentId: data.shipmentId, correlationId });
+    }
     return result;
   } catch (error) {
-    logger.error("Failed to create shipment", { error, shipmentId: data.shipmentId });
-    return { success: false, error: "Failed to create shipment" };
+    logger.error("Failed to create shipment", { error, shipmentId: data.shipmentId, ...(correlationId && { correlationId }) });
+    return { success: false, error: "Sorry, I could not create the shipment right now. Please try again shortly." };
   }
 }
 
 /**
  * Updates a shipment's status via the logistics API.
  * Requirement 12.2
+ * @param shipmentId - Shipment to update
+ * @param updates - Status update data
+ * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
-export async function wrapperUpdateShipment(shipmentId: string, updates: UpdateShipmentData): Promise<unknown> {
+export async function wrapperUpdateShipment(shipmentId: string, updates: UpdateShipmentData, correlationId?: string): Promise<unknown> {
   if (!shipmentId) {
     return { success: false, error: "Shipment ID is required" };
   }
@@ -131,27 +209,38 @@ export async function wrapperUpdateShipment(shipmentId: string, updates: UpdateS
   }
 
   try {
-    const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/status`, {
-      method: "POST",
-      headers: {
+    const result = await withRetry("update_shipment", async () => {
+      const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": process.env.INTERNAL_API_KEY || "",
-      },
-      body: JSON.stringify(updates),
+      };
+      if (correlationId) headers["X-Correlation-Id"] = correlationId;
+
+      const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/status`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(updates),
+      });
+      return await response.json();
     });
-    const result = await response.json();
+    if (correlationId) {
+      logger.info("Voice tool: update_shipment completed", { shipmentId, newStatus: updates.newStatus, correlationId });
+    }
     return result;
   } catch (error) {
-    logger.error("Failed to update shipment", { error, shipmentId });
-    return { success: false, error: "Failed to update shipment" };
+    logger.error("Failed to update shipment", { error, shipmentId, ...(correlationId && { correlationId }) });
+    return { success: false, error: "Sorry, I could not update the shipment right now. Please try again shortly." };
   }
 }
 
 /**
  * Assigns a rider to a shipment via the logistics API.
  * Requirement 12.3
+ * @param shipmentId - Shipment to assign
+ * @param riderId - Rider to assign
+ * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
-export async function wrapperAssignRider(shipmentId: string, riderId: string): Promise<unknown> {
+export async function wrapperAssignRider(shipmentId: string, riderId: string, correlationId?: string): Promise<unknown> {
   if (!shipmentId) {
     return { success: false, error: "Shipment ID is required" };
   }
@@ -160,19 +249,27 @@ export async function wrapperAssignRider(shipmentId: string, riderId: string): P
   }
 
   try {
-    const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/assign`, {
-      method: "POST",
-      headers: {
+    const result = await withRetry("assign_rider", async () => {
+      const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-api-key": process.env.INTERNAL_API_KEY || "",
-      },
-      body: JSON.stringify({ riderId }),
+      };
+      if (correlationId) headers["X-Correlation-Id"] = correlationId;
+
+      const response = await fetch(`${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/assign`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ riderId }),
+      });
+      return await response.json();
     });
-    const result = await response.json();
+    if (correlationId) {
+      logger.info("Voice tool: assign_rider completed", { shipmentId, riderId, correlationId });
+    }
     return result;
   } catch (error) {
-    logger.error("Failed to assign rider", { error, shipmentId, riderId });
-    return { success: false, error: "Failed to assign rider" };
+    logger.error("Failed to assign rider", { error, shipmentId, riderId, ...(correlationId && { correlationId }) });
+    return { success: false, error: "Sorry, I could not assign the rider right now. Please try again shortly." };
   }
 }
 
@@ -182,11 +279,16 @@ export async function wrapperAssignRider(shipmentId: string, riderId: string): P
  * When used purely for event logging (no status change), it posts to the status
  * endpoint with the current status and event metadata in actorType/actorId.
  * Requirement 12.4
+ * @param shipmentId - Shipment to add event to
+ * @param eventType - Type of event
+ * @param payload - Event payload
+ * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
 export async function wrapperAddShipmentEvent(
   shipmentId: string,
   eventType: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  correlationId?: string
 ): Promise<unknown> {
   if (!shipmentId) {
     return { success: false, error: "Shipment ID is required" };
@@ -196,43 +298,52 @@ export async function wrapperAddShipmentEvent(
   }
 
   try {
-    // First, get the current shipment to know its status
-    const getResponse = await fetch(
-      `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}`,
-      {
-        headers: {
-          "x-api-key": process.env.INTERNAL_API_KEY || "",
-        },
-      }
-    );
-    const shipmentData = await getResponse.json();
+    const result = await withRetry("add_shipment_event", async () => {
+      const headers: Record<string, string> = {
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
+      };
+      if (correlationId) headers["X-Correlation-Id"] = correlationId;
 
-    if (!getResponse.ok || !shipmentData?.data) {
-      return { success: false, error: "Failed to retrieve shipment for event logging" };
+      // First, get the current shipment to know its status
+      const getResponse = await fetch(
+        `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}`,
+        { headers }
+      );
+      const shipmentData = await getResponse.json();
+
+      if (!getResponse.ok || !shipmentData?.data) {
+        throw new Error("Failed to retrieve shipment for event logging");
+      }
+
+      const postHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
+      };
+      if (correlationId) postHeaders["X-Correlation-Id"] = correlationId;
+
+      // Post to the status endpoint with event metadata.
+      // The status endpoint creates shipment events as side effects.
+      const response = await fetch(
+        `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/status`,
+        {
+          method: "POST",
+          headers: postHeaders,
+          body: JSON.stringify({
+            newStatus: shipmentData.data.deliveryStatus,
+            actorType: payload.actorType || "agent",
+            actorId: payload.actorId || "voice-agent",
+          }),
+        }
+      );
+      return await response.json();
+    });
+    if (correlationId) {
+      logger.info("Voice tool: add_shipment_event completed", { shipmentId, eventType, correlationId });
     }
-
-    // Post to the status endpoint with event metadata.
-    // The status endpoint creates shipment events as side effects.
-    const response = await fetch(
-      `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/status`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.INTERNAL_API_KEY || "",
-        },
-        body: JSON.stringify({
-          newStatus: shipmentData.data.deliveryStatus,
-          actorType: payload.actorType || "agent",
-          actorId: payload.actorId || "voice-agent",
-        }),
-      }
-    );
-    const result = await response.json();
     return result;
   } catch (error) {
-    logger.error("Failed to add shipment event", { error, shipmentId, eventType });
-    return { success: false, error: "Failed to add shipment event" };
+    logger.error("Failed to add shipment event", { error, shipmentId, eventType, ...(correlationId && { correlationId }) });
+    return { success: false, error: "Sorry, I could not add the shipment event right now. Please try again shortly." };
   }
 }
 

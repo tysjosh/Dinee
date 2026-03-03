@@ -70,6 +70,8 @@ export const createShipment = mutation({
     paymentMethod: v.optional(logisticsPaymentMethodValidator),
     paymentStatus: v.optional(paymentStatusValidator),
     etaMinutes: v.optional(v.number()),
+    // Req 17.8: Voice session correlation ID for shipment events
+    correlationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Atomic uniqueness check on shipmentId
@@ -139,6 +141,8 @@ export const createShipment = mutation({
         deliveryStatus: "created",
       }),
       createdAt: now,
+      // Req 17.8: Propagate voice session correlationId to shipment events
+      ...(args.correlationId ? { correlationId: args.correlationId } : {}),
     });
 
     return { shipmentId: args.shipmentId, trackingCode, docId };
@@ -247,6 +251,8 @@ export const updateShipmentStatus = mutation({
     proofOfDelivery: v.optional(proofOfDeliveryValidator),
     actorType: v.optional(actorTypeValidator),
     actorId: v.optional(v.string()),
+    // Req 17.8: Voice session correlation ID for shipment events
+    correlationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Look up the shipment
@@ -344,6 +350,8 @@ export const updateShipmentStatus = mutation({
         ...(args.failureReason ? { failureReason: args.failureReason } : {}),
       }),
       createdAt: now,
+      // Req 17.8: Propagate voice session correlationId to shipment events
+      ...(args.correlationId ? { correlationId: args.correlationId } : {}),
     });
 
     // ─── Additional events for special statuses ───
@@ -358,6 +366,7 @@ export const updateShipmentStatus = mutation({
         actorId,
         payload: JSON.stringify(args.proofOfDelivery),
         createdAt: now,
+        ...(args.correlationId ? { correlationId: args.correlationId } : {}),
       });
     }
 
@@ -371,6 +380,7 @@ export const updateShipmentStatus = mutation({
         actorId,
         payload: JSON.stringify({ failureReason: args.failureReason }),
         createdAt: now,
+        ...(args.correlationId ? { correlationId: args.correlationId } : {}),
       });
     }
 
@@ -395,6 +405,8 @@ export const assignRider = mutation({
   args: {
     shipmentId: v.string(),
     riderId: v.string(),
+    // Req 17.8: Voice session correlation ID for shipment events
+    correlationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // 1. Look up shipment
@@ -460,6 +472,8 @@ export const assignRider = mutation({
         newStatus: "assigned",
       }),
       createdAt: now,
+      // Req 17.8: Propagate voice session correlationId to shipment events
+      ...(args.correlationId ? { correlationId: args.correlationId } : {}),
     });
 
     return {
