@@ -9,7 +9,7 @@
  * @requirements 12.1, 12.2, 12.3, 12.4, 12.5
  */
 
-import { createLogger } from "../../lib/logger.ts";
+import { createLogger } from "../../lib/logger";
 
 const logger = createLogger("ws-server-logistics-tools");
 
