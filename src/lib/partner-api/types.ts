@@ -210,7 +210,13 @@ export type WebhookEventType =
   | 'call.ended'
   | 'call.transferred'
   | 'payment.completed'
-  | 'payment.failed';
+  | 'payment.failed'
+  // Logistics vertical event types (Requirement 10.4)
+  | 'shipment.created'
+  | 'shipment.assigned'
+  | 'shipment.status_updated'
+  | 'shipment.delivered'
+  | 'shipment.failed';
 
 /**
  * Webhook delivery status
@@ -525,6 +531,9 @@ export const API_SCOPES = [
   'calls:write',
   'analytics:read',
   'webhooks:manage',
+  'shipments:read',
+  'shipments:write',
+  'riders:write',
 ] as const;
 
 export type ApiKeyScope = typeof API_SCOPES[number];

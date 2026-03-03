@@ -25,8 +25,7 @@ function createMockConvexClient(queryResponses: Record<string, unknown>) {
       callIndex++;
       return response;
     }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  } as any; // eslint-disable-line
 }
 
 // ============================================================================

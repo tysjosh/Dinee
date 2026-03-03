@@ -26,6 +26,18 @@ import {
   generateBlockedCallTwiML,
 } from "./tools.ts";
 import { CallPhase, isToolAllowed, nextPhase } from "./call-phase.ts";
+import {
+  LogisticsCallPhase,
+  isLogisticsToolAllowed,
+  nextLogisticsPhase,
+} from "./logistics-call-phase.ts";
+import {
+  wrapperCreateShipment,
+  wrapperUpdateShipment,
+  wrapperAssignRider,
+  wrapperAddShipmentEvent,
+  wrapperQuoteDelivery,
+} from "./logistics-tools.ts";
 import twilio from "twilio";
 import { createLogger } from "../../lib/logger.ts";
 
@@ -103,12 +115,15 @@ fastify.all("/incoming-call", async (request: any, reply) => {
     }
   }
   
+  // Detect vertical from request (defaults to "restaurant" for backward compatibility)
+  const vertical = request.body?.Vertical || request.query?.vertical || "restaurant";
+
   // Pass call context via query params to the WebSocket connection
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
     <Pause length="1"/>
     <Connect>
-    <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}" />
+    <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}&amp;vertical=${encodeURIComponent(vertical)}" />
     </Connect>
     </Response>
   `;
@@ -169,6 +184,8 @@ fastify.register(async (fastify) => {
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const callSid = url.searchParams.get("callSid") || "";
     const fromNumber = url.searchParams.get("from") || "";
+    const vertical = url.searchParams.get("vertical") || "restaurant";
+    const isLogistics = vertical === "logistics";
     
     // Connection-specific state
     let streamSid: string | null = null;
@@ -184,6 +201,9 @@ fastify.register(async (fastify) => {
     // Call phase state machine
     let callPhase: CallPhase = "await_restaurant_id";
 
+    // Logistics call phase state machine (used when isLogistics === true)
+    let logisticsPhase: LogisticsCallPhase = "await_org_verification";
+
     // OpenAI socket
     const oaWs = new WebSocket(
       "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17",
@@ -195,6 +215,209 @@ fastify.register(async (fastify) => {
       },
     );
     const initializeSession = () => {
+      // Logistics tool definitions for OpenAI session
+      const logisticsTools = [
+        {
+          type: "function",
+          name: "get_organization_details",
+          description: "Look up a logistics organization by ID to verify the caller's company",
+          parameters: {
+            type: "object",
+            properties: {
+              organization_id: { type: "string", description: "The organization ID to look up" },
+            },
+            required: ["organization_id"],
+          },
+        },
+        {
+          type: "function",
+          name: "create_shipment",
+          description: "Create a new shipment for delivery",
+          parameters: {
+            type: "object",
+            properties: {
+              shipmentId: { type: "string", description: "Unique shipment identifier" },
+              organizationId: { type: "string", description: "Organization ID" },
+              sender: {
+                type: "object",
+                properties: {
+                  name: { type: "string" }, phone: { type: "string" },
+                  address: { type: "string" }, city: { type: "string" },
+                  state: { type: "string" },
+                },
+                required: ["name", "phone", "address", "city", "state"],
+              },
+              recipient: {
+                type: "object",
+                properties: {
+                  name: { type: "string" }, phone: { type: "string" },
+                  address: { type: "string" }, city: { type: "string" },
+                  state: { type: "string" },
+                },
+                required: ["name", "phone", "address", "city", "state"],
+              },
+              parcel: {
+                type: "object",
+                properties: {
+                  type: { type: "string" },
+                  weightKg: { type: "number" },
+                  notes: { type: "string" },
+                },
+                required: ["type"],
+              },
+              serviceType: { type: "string", enum: ["same_day", "next_day", "express", "scheduled"] },
+            },
+            required: ["shipmentId", "organizationId", "sender", "recipient", "parcel", "serviceType"],
+          },
+        },
+        {
+          type: "function",
+          name: "quote_delivery",
+          description: "Get a delivery cost and ETA estimate based on sender/recipient locations and service type",
+          parameters: {
+            type: "object",
+            properties: {
+              sender: {
+                type: "object",
+                properties: { city: { type: "string" }, state: { type: "string" } },
+                required: ["city", "state"],
+              },
+              recipient: {
+                type: "object",
+                properties: { city: { type: "string" }, state: { type: "string" } },
+                required: ["city", "state"],
+              },
+              serviceType: { type: "string", enum: ["same_day", "next_day", "express", "scheduled"] },
+            },
+            required: ["sender", "recipient", "serviceType"],
+          },
+        },
+        {
+          type: "function",
+          name: "update_shipment",
+          description: "Update a shipment's status or details",
+          parameters: {
+            type: "object",
+            properties: {
+              shipmentId: { type: "string" },
+              newStatus: { type: "string", enum: ["created", "assigned", "picked_up", "in_transit", "delivered", "failed", "cancelled"] },
+              failureReason: { type: "string" },
+            },
+            required: ["shipmentId", "newStatus"],
+          },
+        },
+        {
+          type: "function",
+          name: "assign_rider",
+          description: "Assign an available rider to a shipment",
+          parameters: {
+            type: "object",
+            properties: {
+              shipmentId: { type: "string" },
+              riderId: { type: "string" },
+            },
+            required: ["shipmentId", "riderId"],
+          },
+        },
+        {
+          type: "function",
+          name: "add_shipment_event",
+          description: "Add an event to the shipment's audit log",
+          parameters: {
+            type: "object",
+            properties: {
+              shipmentId: { type: "string" },
+              eventType: { type: "string" },
+              payload: { type: "object" },
+            },
+            required: ["shipmentId", "eventType"],
+          },
+        },
+      ];
+
+      const LOGISTICS_SYSTEM_PROMPT = `You are an AI logistics agent handling calls for a delivery and shipping company. Your name is Jordan. At the start of the conversation, greet the caller and ask for their organization ID to verify their company. Once verified, you can help them book shipments, get delivery quotes, and manage existing shipments. Keep responses short, professional, and to the point.`;
+
+      // Restaurant tool definitions (existing)
+      const restaurantTools = [
+        {
+          type: "function",
+          name: "get_restaurant_details",
+          description: "Fetch restaurant profile and menu for a given restaurant ID",
+          parameters: {
+            type: "object",
+            properties: { restaurant_id: { type: "string" } },
+            required: ["restaurant_id"],
+          },
+        },
+        {
+          type: "function",
+          name: "upsert_call_data",
+          description: "Insert or update a call row in the Convex `calls` table",
+          parameters: {
+            type: "object",
+            properties: {
+              restaurantId: { type: "string", description: "5-digit restaurant ID. This will be the same restaurant id provided by the user." },
+              orderId: { type: "string", description: "The generated order id." },
+            },
+            required: ["restaurantId"]
+          }
+        },
+        {
+          type: "function",
+          name: "add_transcript_dialogue",
+          description: `Use this tool always for appending the ai message. This ai message is the one that you speak to the user. Take a moment, think what to speak and then use this tool to add the response that you provided to the user. Make sure to use this tool. Once the restaurant id is confirmed and validated use this tool to update the messages you convey to the user.`,
+          parameters: {
+            type: "object",
+            properties: {
+              dialogue: { type: "string", description: "Make sure not to change anything in the dialogues, direct as it is said to the user." },
+              speaker: { type: "string", enum: ["ai", "human"] }
+            },
+            required: ["dialogue", "speaker"]
+          }
+        },
+        {
+          type: "function",
+          name: "upsert_order",
+          description: "Insert or update a food order in the Convex `orders` table",
+          parameters: {
+            type: "object",
+            properties: {
+              orderId: { type: "string", description: "4-digit ID you gave to the caller" },
+              restaurantId: { type: "string", description: "Restaurant ID" },
+              customerName: { type: "string", description: "Customer's name" },
+              items: {
+                type: "array",
+                description: "One row per menu item",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    quantity: { type: "integer" },
+                    price: { type: "number" }
+                  },
+                  required: ["name", "quantity", "price"]
+                }
+              },
+              specialInstructions: { type: "string", description: "Overall instructions about a dish/order/anything that is extra and needs restaurant's attention to complete the order with ease." },
+              status: { type: "string", enum: ["active", "completed", "cancelled"] }
+            },
+            required: ["orderId", "restaurantId", "customerName", "items", "status"]
+          }
+        },
+        {
+          type: "function",
+          name: "generate_order_id",
+          description: "Generate a unique order ID. Returns an internal orderId for API lookups and a publicOrderCode (6-char alphanumeric) to read back to the customer as their order reference.",
+          parameters: { type: "object", properties: {}, required: [] }
+        },
+      ];
+
+      const sessionTools = isLogistics ? logisticsTools : restaurantTools;
+      const sessionPrompt = isLogistics ? LOGISTICS_SYSTEM_PROMPT : SYSTEM_PROMPT;
+      const transcriptionPrompt = isLogistics
+        ? "Expect words related to logistics, shipments, delivery, tracking, addresses, and rider dispatch."
+        : "Expect words related to restaurant orders, food items, phone numbers, and customer service.";
+
       oaWs.send(
         JSON.stringify({
           type: "session.update",
@@ -203,97 +426,15 @@ fastify.register(async (fastify) => {
             input_audio_format: "g711_ulaw",
             output_audio_format: "g711_ulaw",
             voice: VOICE,
-            instructions: SYSTEM_PROMPT,
+            instructions: sessionPrompt,
             modalities: ["text", "audio"],
             temperature: 0.8,
-            // Enable input transcription only
             input_audio_transcription: {
               model: "gpt-4o-mini-transcribe",
-              prompt: "Expect words related to restaurant orders, food items, phone numbers, and customer service.",
+              prompt: transcriptionPrompt,
               language: "en"
             },
-            // Remove output_audio_transcription to fix audio quality issues
-            tools: [
-              // Get restaurant details tool
-              {
-                type: "function",
-                name: "get_restaurant_details",
-                description:
-                  "Fetch restaurant profile and menu for a given restaurant ID",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    restaurant_id: { type: "string" },
-                  },
-                  required: ["restaurant_id"],
-                },
-              },
-              // Upsert call data tool
-              {
-                type: "function",
-                name: "upsert_call_data",
-                description: "Insert or update a call row in the Convex `calls` table",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    restaurantId: { type: "string", description: "5-digit restaurant ID. This will be the same restaurant id provided by the user." },
-                    orderId: { type: "string", description: "The generated order id." },
-                  },
-                  required: ["restaurantId"]
-                }
-              },
-              // Add transcription dialogue tool
-              {
-                type: "function",
-                name: "add_transcript_dialogue",
-                description: `Use this tool always for appending the ai message. This ai message is the one that you speak to the user. Take a moment, think what to speak and then use this tool to add the response that you provided to the user. Make sure to use this tool. Once the restaurant id is confirmed and validated use this tool to update the messages you convey to the user.`,
-                parameters: {
-                  type: "object",
-                  properties: {
-                    dialogue: { type: "string", description: "Make sure not to change anything in the dialogues, direct as it is said to the user." },
-                    speaker: { type: "string", enum: ["ai", "human"] }
-                  },
-                  required: ["dialogue", "speaker"]
-                }
-              },
-              // Upsert the order tool
-              {
-                type: "function",
-                name: "upsert_order",
-                description: "Insert or update a food order in the Convex `orders` table",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    orderId: { type: "string", description: "4-digit ID you gave to the caller" },
-                    restaurantId: { type: "string", description: "Restaurant ID" },
-                    customerName: { type: "string", description: "Customer's name" },
-                    items: {
-                      type: "array",
-                      description: "One row per menu item",
-                      items: {
-                        type: "object",
-                        properties: {
-                          name: { type: "string" },
-                          quantity: { type: "integer" },
-                          price: { type: "number" }
-                        },
-                        required: ["name", "quantity", "price"]
-                      }
-                    },
-                    specialInstructions: { type: "string", description: "Overall instructions about a dish/order/anything that is extra and needs restaurant's attention to complete the order with ease." },
-                    status: { type: "string", enum: ["active", "completed", "cancelled"] }
-                  },
-                  required: ["orderId", "restaurantId", "customerName", "items", "status"]
-                }
-              },
-              // Generate unique order id
-              {
-                type: "function",
-                name: "generate_order_id",
-                description: "Generate a unique order ID. Returns an internal orderId for API lookups and a publicOrderCode (6-char alphanumeric) to read back to the customer as their order reference.",
-                parameters: { type: "object", properties: {}, required: [] }
-              },
-            ],
+            tools: sessionTools,
           },
         }),
       );
@@ -457,50 +598,89 @@ fastify.register(async (fastify) => {
         const toolName: string = res.name;
         let output: Record<string, unknown> = { success: false };
 
-        if (!isToolAllowed(callPhase, toolName)) {
-          logger.error("Tool rejected", {
-            callId: callSid,
-          });
-          output = { success: false, error: `Tool ${toolName} not allowed in phase ${callPhase}` };
-        } else {
-          try {
-            switch (toolName) {
-              case "get_restaurant_details":
-                output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
-                if (output.success) {
-                  restaurantIdConfirmed = true;
-                  currentRestaurantId = args.restaurant_id;
-                  callPhase = nextPhase(callPhase, "restaurant_verified");
-                }
-                break;
-              case "add_transcript_dialogue":
-                output = await wrapperAddTranscriptDialogues({
-                  ...args,
-                  callId: callSid
-                }) as Record<string, unknown>;
-                break;
-              case "upsert_order":
-                output = await wrapperUpsertOrders({
-                  ...args,
-                  callId: callSid,
-                }) as Record<string, unknown>;
-                if (output.success && args.status === "completed") {
-                  callPhase = nextPhase(callPhase, "order_finalized");
-                }
-                break;
-              case "upsert_call_data":
-                output = await wrapperUpsertCallData({
-                  ...args,
-                  callId: callSid,
-                }) as Record<string, unknown>;
-                break;
-              case "generate_order_id":
-                output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
-                callPhase = nextPhase(callPhase, "order_id_generated");
-                break;
+        if (isLogistics) {
+          // Logistics tool dispatch
+          if (!isLogisticsToolAllowed(logisticsPhase, toolName)) {
+            logger.error("Logistics tool rejected", {
+              callId: callSid,
+            });
+            output = { success: false, error: `Tool ${toolName} not allowed in phase ${logisticsPhase}` };
+          } else {
+            try {
+              switch (toolName) {
+                case "get_organization_details":
+                  // Org lookup — for now return a stub; real implementation would query Convex
+                  output = { success: true, organization: { id: args.organization_id, name: "Organization " + args.organization_id } };
+                  logisticsPhase = nextLogisticsPhase(logisticsPhase, "org_verified");
+                  break;
+                case "create_shipment":
+                  output = await wrapperCreateShipment(args) as Record<string, unknown>;
+                  if (output.success) logisticsPhase = nextLogisticsPhase(logisticsPhase, "shipment_created");
+                  break;
+                case "quote_delivery":
+                  output = wrapperQuoteDelivery(args.sender, args.recipient, args.serviceType) as unknown as Record<string, unknown>;
+                  break;
+                case "update_shipment":
+                  output = await wrapperUpdateShipment(args.shipmentId, args) as Record<string, unknown>;
+                  break;
+                case "assign_rider":
+                  output = await wrapperAssignRider(args.shipmentId, args.riderId) as Record<string, unknown>;
+                  break;
+                case "add_shipment_event":
+                  output = await wrapperAddShipmentEvent(args.shipmentId, args.eventType, args.payload || {}) as Record<string, unknown>;
+                  break;
+              }
+            } catch (e) {
+              output = { success: false, error: String(e) };
             }
-          } catch (e) {
-            output = { success: false, error: String(e) };
+          }
+        } else {
+          // Restaurant tool dispatch (existing, unchanged)
+          if (!isToolAllowed(callPhase, toolName)) {
+            logger.error("Tool rejected", {
+              callId: callSid,
+            });
+            output = { success: false, error: `Tool ${toolName} not allowed in phase ${callPhase}` };
+          } else {
+            try {
+              switch (toolName) {
+                case "get_restaurant_details":
+                  output = await wrapperGetRestaurantDetails(args.restaurant_id) as Record<string, unknown>;
+                  if (output.success) {
+                    restaurantIdConfirmed = true;
+                    currentRestaurantId = args.restaurant_id;
+                    callPhase = nextPhase(callPhase, "restaurant_verified");
+                  }
+                  break;
+                case "add_transcript_dialogue":
+                  output = await wrapperAddTranscriptDialogues({
+                    ...args,
+                    callId: callSid
+                  }) as Record<string, unknown>;
+                  break;
+                case "upsert_order":
+                  output = await wrapperUpsertOrders({
+                    ...args,
+                    callId: callSid,
+                  }) as Record<string, unknown>;
+                  if (output.success && args.status === "completed") {
+                    callPhase = nextPhase(callPhase, "order_finalized");
+                  }
+                  break;
+                case "upsert_call_data":
+                  output = await wrapperUpsertCallData({
+                    ...args,
+                    callId: callSid,
+                  }) as Record<string, unknown>;
+                  break;
+                case "generate_order_id":
+                  output = { orderId: generateOrderId(), publicOrderCode: generatePublicOrderCode() };
+                  callPhase = nextPhase(callPhase, "order_id_generated");
+                  break;
+              }
+            } catch (e) {
+              output = { success: false, error: String(e) };
+            }
           }
         }
 

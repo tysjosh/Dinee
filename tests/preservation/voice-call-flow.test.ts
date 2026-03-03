@@ -151,6 +151,19 @@ function extractToolSwitchBlocks(source: string): string[] {
   return blocks;
 }
 
+/**
+ * Find the switch block(s) that contain a specific tool case.
+ * This is needed because the logistics vertical added additional switch blocks
+ * to the same handler — the restaurant blocks are still present but may not be
+ * at the same positional index.
+ */
+function findSwitchBlocksContaining(blocks: string[], toolName: string): string[] {
+  return blocks.filter(block => {
+    const cases = extractSwitchCaseNames(block);
+    return cases.includes(toolName);
+  });
+}
+
 function hasWebSocketRoute(source: string, routePath: string): boolean {
   const pattern = new RegExp(`["']${routePath.replace(/\//g, '\\/')}["']`);
   return pattern.test(source);
@@ -224,10 +237,14 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
       expect(switchBlocks.length).toBeGreaterThanOrEqual(2);
     });
 
-    // The first switch block is the main /media-stream handler
+    // Find the switch block that contains restaurant tools (get_restaurant_details)
+    // The logistics vertical may have added additional switch blocks before it
     it('main stream switch block dispatches all expected tools', () => {
       expect(switchBlocks.length).toBeGreaterThan(0);
-      const mainBlock = switchBlocks[0];
+      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
+      // The first restaurant block is the main /media-stream handler
+      const mainBlock = restaurantBlocks[0];
       const dispatchedTools = extractSwitchCaseNames(mainBlock);
 
       for (const tool of MAIN_STREAM_DISPATCHED_TOOLS) {
@@ -246,7 +263,10 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
 
     it('callback stream switch block dispatches expected tools', () => {
       expect(switchBlocks.length).toBeGreaterThanOrEqual(2);
-      const callbackBlock = switchBlocks[1];
+      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(2);
+      // The second restaurant block is the callback /media-stream-callback handler
+      const callbackBlock = restaurantBlocks[1];
       const dispatchedTools = extractSwitchCaseNames(callbackBlock);
 
       for (const tool of CALLBACK_STREAM_DISPATCHED_TOOLS) {
@@ -335,8 +355,9 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     });
 
     it('all main-stream tools are dispatched for any sampled tool', () => {
-      expect(switchBlocks.length).toBeGreaterThan(0);
-      const mainDispatch = extractSwitchCaseNames(switchBlocks[0]);
+      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
+      const mainDispatch = extractSwitchCaseNames(restaurantBlocks[0]);
       const toolArb = fc.constantFrom(...MAIN_STREAM_DISPATCHED_TOOLS);
 
       fc.assert(
@@ -348,8 +369,9 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     });
 
     it('all callback-stream tools are dispatched for any sampled tool', () => {
-      expect(switchBlocks.length).toBeGreaterThanOrEqual(2);
-      const callbackDispatch = extractSwitchCaseNames(switchBlocks[1]);
+      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(2);
+      const callbackDispatch = extractSwitchCaseNames(restaurantBlocks[1]);
       const toolArb = fc.constantFrom(...CALLBACK_STREAM_DISPATCHED_TOOLS);
 
       fc.assert(

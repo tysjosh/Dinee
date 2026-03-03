@@ -1,5 +1,17 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  verticalValidator,
+  deliveryStatusValidator,
+  serviceTypeValidator,
+  riderStatusValidator,
+  logisticsPaymentMethodValidator,
+  paymentStatusValidator,
+  actorTypeValidator,
+  addressValidator,
+  parcelValidator,
+  proofOfDeliveryValidator,
+} from "./shared/validators";
 
 export default defineSchema({
   // Platform (multi-tenant support)
@@ -21,6 +33,8 @@ export default defineSchema({
       smsEnabled: v.boolean(),
     }),
     createdAt: v.number(),
+    // Logistics vertical: enabled verticals for this platform
+    enabledVerticals: v.optional(v.array(verticalValidator)),
   }).index("by_platform_id", ["platformId"]),
 
   // Users (role-based access control)
@@ -121,6 +135,8 @@ export default defineSchema({
     asrConfidence: v.optional(v.number()), // ASR confidence score
     languageDetected: v.optional(v.string()), // Detected language
     fallbackTriggered: v.optional(v.boolean()), // Whether fallback was triggered
+    // Logistics vertical: vertical discriminator
+    vertical: v.optional(verticalValidator),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -215,6 +231,9 @@ export default defineSchema({
     // Timestamps
     orderPlacementTime: v.optional(v.number()),
     cancellationReason: v.optional(v.string()),
+    // Logistics vertical: vertical discriminator and location reference
+    vertical: v.optional(verticalValidator),
+    locationId: v.optional(v.string()),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -278,10 +297,15 @@ export default defineSchema({
     verified: v.boolean(),
     processed: v.boolean(),
     orderId: v.optional(v.string()),
+    // Logistics vertical: polymorphic webhook event fields
+    shipmentId: v.optional(v.string()),
+    resourceType: v.optional(v.union(v.literal("order"), v.literal("shipment"))),
+    resourceId: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_event_id", ["eventId"])
-    .index("by_order_id", ["orderId"]),
+    .index("by_order_id", ["orderId"])
+    .index("by_shipment_id", ["shipmentId"]),
 
   // Customer Preferences (WhatsApp/SMS opt-in management)
   customerPreferences: defineTable({
@@ -300,6 +324,8 @@ export default defineSchema({
     isActive: v.boolean(),
     platformId: v.string(),
     restaurantIds: v.optional(v.array(v.string())),
+    // Logistics vertical: organization access list
+    organizationIds: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_partner_id", ["partnerId"])
@@ -776,5 +802,113 @@ export default defineSchema({
     consumed: v.boolean(),       // Set true after media-stream-callback reads it
   })
     .index("by_session_id", ["sessionId"])
+    .index("by_expires_at", ["expiresAt"]),
+
+  // Logistics: Organizations (multi-vertical tenant entities)
+  // Requirements: 2.1, 2.2
+  organizations: defineTable({
+    organizationId: v.string(),
+    platformId: v.string(),
+    vertical: verticalValidator,
+    name: v.string(),
+    settings: v.object({}),
+    createdAt: v.number(),
+  })
+    .index("by_organization_id", ["organizationId"])
+    .index("by_platform_id", ["platformId"])
+    .index("by_vertical", ["vertical"]),
+
+  // Logistics: Locations (physical sites — hubs, warehouses, branches)
+  // Requirements: 3.1, 3.2
+  locations: defineTable({
+    locationId: v.string(),
+    organizationId: v.string(),
+    name: v.string(),
+    address: v.string(),
+    city: v.string(),
+    state: v.string(),
+    geo: v.object({ lat: v.number(), lng: v.number() }),
+    isActive: v.boolean(),
+    operatingHours: v.object({}),
+    createdAt: v.number(),
+  })
+    .index("by_location_id", ["locationId"])
+    .index("by_organization_id", ["organizationId"])
+    .index("by_city_state", ["city", "state"]),
+
+  // Logistics: Shipments (parcel lifecycle tracking)
+  // Requirements: 4.1, 4.2, 4.9
+  shipments: defineTable({
+    shipmentId: v.string(),
+    trackingCode: v.string(),
+    organizationId: v.string(),
+    locationId: v.optional(v.string()),
+    customerId: v.optional(v.string()),
+    sender: addressValidator,
+    recipient: addressValidator,
+    parcel: parcelValidator,
+    serviceType: serviceTypeValidator,
+    paymentMethod: v.optional(logisticsPaymentMethodValidator),
+    paymentStatus: v.optional(paymentStatusValidator),
+    deliveryStatus: deliveryStatusValidator,
+    failureReason: v.optional(v.string()),
+    etaMinutes: v.optional(v.number()),
+    assignedRiderId: v.optional(v.string()),
+    proofOfDelivery: v.optional(proofOfDeliveryValidator),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_shipment_id", ["shipmentId"])
+    .index("by_tracking_code", ["trackingCode"])
+    .index("by_organization_id", ["organizationId"])
+    .index("by_delivery_status", ["deliveryStatus"])
+    .index("by_assigned_rider_id", ["assignedRiderId"]),
+
+  // Logistics: Riders (delivery personnel)
+  // Requirements: 5.1, 5.2
+  riders: defineTable({
+    riderId: v.string(),
+    organizationId: v.string(),
+    name: v.string(),
+    phone: v.string(),
+    vehicleType: v.string(),
+    status: riderStatusValidator,
+    lastLocation: v.optional(v.object({
+      lat: v.number(),
+      lng: v.number(),
+      updatedAt: v.number(),
+    })),
+    isActive: v.boolean(),
+  })
+    .index("by_rider_id", ["riderId"])
+    .index("by_organization_id", ["organizationId"])
+    .index("by_status", ["status"]),
+
+  // Logistics: Shipment Events (immutable audit log)
+  // Requirements: 6.1, 6.2
+  shipmentEvents: defineTable({
+    eventId: v.string(),
+    shipmentId: v.string(),
+    eventType: v.string(),
+    actorType: actorTypeValidator,
+    actorId: v.string(),
+    payload: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_shipment_id", ["shipmentId"])
+    .index("by_event_type", ["eventType"]),
+
+  // Logistics: Idempotency Keys (replay protection for write endpoints)
+  // Requirements: 21.1, 21.2, 21.5
+  idempotencyKeys: defineTable({
+    key: v.string(),
+    partnerId: v.string(),
+    requestHash: v.string(),
+    responseStatus: v.number(),
+    responseBody: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_key_and_partner", ["key", "partnerId"])
     .index("by_expires_at", ["expiresAt"]),
 });

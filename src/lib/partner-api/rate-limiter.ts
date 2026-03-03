@@ -198,9 +198,7 @@ function getBackend(): RateLimiterBackend {
     try {
       // Dynamic imports are resolved at build time in Next.js; these packages
       // are listed in dependencies so the require calls work at runtime.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { Ratelimit } = require('@upstash/ratelimit') as typeof import('@upstash/ratelimit');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
 
       const redis = new Redis({ url: redisUrl, token: redisToken });

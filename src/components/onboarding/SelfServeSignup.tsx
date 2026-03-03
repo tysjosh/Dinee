@@ -274,7 +274,7 @@ const SelfServeSignup: React.FC<SelfServeSignupProps> = ({
   /**
    * Handle form submission
    */
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!validateCurrentStep()) {
       return;
     }
@@ -340,7 +340,7 @@ const SelfServeSignup: React.FC<SelfServeSignupProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [validateCurrentStep, formData, businessRegFile, ownerIdFile, createRestaurantOwner, submitVerificationDocuments, onComplete]);
 
   // Handle Enter key for navigation
   useEffect(() => {
@@ -357,7 +357,7 @@ const SelfServeSignup: React.FC<SelfServeSignupProps> = ({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [currentStep, isSubmitting, handleNext]);
+  }, [currentStep, isSubmitting, handleNext, handleSubmit]);
 
 
   /**

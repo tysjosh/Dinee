@@ -62,7 +62,9 @@ const featureFlagNameValidator = v.union(
   v.literal("self_serve_billing_enabled"),
   // Migration features
   v.literal("legacy_api_mode"),
-  v.literal("migration_complete")
+  v.literal("migration_complete"),
+  // Logistics features
+  v.literal("logistics_api_enabled")
 );
 
 /**

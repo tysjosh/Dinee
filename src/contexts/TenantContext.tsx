@@ -332,6 +332,7 @@ export function TenantProvider({
     }
 
     dispatch({ type: 'SET_TENANT_SCOPE', payload: scope });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.platform, state.restaurant, state.branch, state.userRole]);
 
   /**
@@ -348,6 +349,7 @@ export function TenantProvider({
       // Check specific resource permission
       return permission.resource === resource && permission.actions.includes(action);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.permissions]);
 
   /**
@@ -419,6 +421,7 @@ export function TenantProvider({
     }
 
     return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.userRole, state.platform, state.restaurant, state.branch]);
 
   /**
@@ -459,6 +462,7 @@ export function TenantProvider({
     }
 
     return {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.tenantScope, state.userRole]);
 
   const actions = {

@@ -54,6 +54,9 @@ export const createWebhookEvent = mutation({
  * serialized per document, eliminating TOCTOU race).
  * Returns { inserted: false, alreadyProcessed } if the event already exists,
  * or { inserted: true, id } on successful insert.
+ *
+ * Supports optional logistics fields (shipmentId, resourceType, resourceId)
+ * for polymorphic webhook events across restaurant and logistics verticals.
  */
 export const atomicInsertWebhookEvent = mutation({
   args: {
@@ -65,6 +68,10 @@ export const atomicInsertWebhookEvent = mutation({
     verified: v.boolean(),
     processed: v.boolean(),
     orderId: v.optional(v.string()),
+    // Logistics vertical: polymorphic webhook event fields
+    shipmentId: v.optional(v.string()),
+    resourceType: v.optional(v.union(v.literal("order"), v.literal("shipment"))),
+    resourceId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Check within the same transaction — atomic
@@ -84,6 +91,7 @@ export const atomicInsertWebhookEvent = mutation({
     return { inserted: true as const, id };
   },
 });
+
 
 
 /**
