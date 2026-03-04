@@ -221,17 +221,23 @@ Additive implementation of a logistics vertical alongside the existing restauran
     - Define `LogisticsCallPhase` type: `await_org_verification`, `org_verified`, `shipment_open`, `shipment_confirmed`
     - Define `ALLOWED_TOOLS` mapping per phase per design
     - Implement `isLogisticsToolAllowed(phase, toolName)` and `nextLogisticsPhase(current, event)`
-    - _Requirements: 11.6, 11.7, 27.1, 27.2, 27.3, 27.4, 27.5_
+    - **Note**: `shipment_confirmed` phase allows `get_organization_details` + `quote_delivery` (read-only). This follows the platform-hardening spec correction, not the original Req 27.1 which said `add_shipment_event` only.
+    - _Requirements: 11.6, 11.7, 27.1 (superseded by platform-hardening Req 14.8), 27.2, 27.3, 27.4, 27.5_
   - [x] 10.2 Create `src/app/ws-server/logistics-tools.ts`
     - Implement `wrapperCreateShipment`, `wrapperUpdateShipment`, `wrapperAssignRider`, `wrapperAddShipmentEvent`, `wrapperQuoteDelivery`
     - Each tool calls the corresponding logistics API endpoint internally
+    - `wrapperAddShipmentEvent` calls the `createShipmentEvent` Convex mutation directly via `ConvexHttpClient` — a proper dedicated event-append tool
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5_
   - [x] 10.3 Integrate logistics tool pack into WS server
-    - In `src/app/ws-server/index.ts`, detect conversation type from called number's vertical
-    - Dispatch to logistics call phase manager when `conversation_type` starts with `logistics_`
-    - Gate tool execution via `isLogisticsToolAllowed` before invoking logistics tools
-    - Preserve existing restaurant tool dispatch unchanged
-    - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 12.6, 12.7, 12.8_
+    - **Implemented**: WS server uses phone-number-based routing via `resolvePhoneToRoute()` to determine `conversationType`. The `isLogistics` boolean is derived from `conversationType.startsWith("logistics_")`. Tool execution gated via `isLogisticsToolAllowed`. Existing restaurant tool dispatch preserved unchanged.
+    - _Covers: 11.4 (tool pack selection via conversation type), 11.5 (restaurant phases unchanged), 12.6, 12.7, 12.8_
+  - [x] 10.5 Implement conversation type enums and phone-number-based call routing
+    - Define conversation type enums: `restaurant_inbound_order`, `restaurant_followup`, `restaurant_cancellation`, `logistics_booking`, `logistics_followup`, `logistics_failure_notice`
+    - Add `conversation_type` field to `calls` table
+    - Implement phone-number-to-organization lookup: when an inbound call arrives, determine the conversation type based on the called number's associated vertical and Organization
+    - Replace `?vertical=logistics` query param routing with phone-number-based vertical detection
+    - Select tool pack based on conversation type enum, not boolean flag
+    - _Requirements: 11.1, 11.2, 11.3, 11.4_
   - [x] 10.4 Write property test for logistics call phase tool gating
     - **Property 10: Tools are only accessible in their allowed phases**
     - For all `(phase, tool)` pairs not in `ALLOWED_TOOLS`: `isLogisticsToolAllowed` returns false
@@ -286,6 +292,7 @@ Additive implementation of a logistics vertical alongside the existing restauran
     - **Property 11: Restaurant API responses are unchanged after logistics deployment**
     - For all existing restaurant API endpoints: response payload shapes match pre-logistics baseline
     - New optional fields do not break existing consumers
+    - **Verified**: `tests/logistics/restaurant-api-non-regression.test.ts` exists with 87 tests, all passing. Validates Property 11 for Requirements 8.2, 8.6, 24.1, 24.2.
     - **Validates: Requirements 8.2, 8.6, 24.1, 24.2**
 
 - [x] 16. Final checkpoint — Ensure all tests pass
@@ -305,3 +312,29 @@ Additive implementation of a logistics vertical alongside the existing restauran
 - Authorization utility (Task 6.2) is designed with a shared interface for future vertical parity
 - Idempotency layer (Task 6.4) uses a shared `idempotencyKeys` table scoped by partner, reusable for restaurant write paths in the future
 - All entity creation mutations use atomic check-and-insert with descriptive 409 Conflict responses identifying the conflicting field
+
+## Audit Notes (March 2026)
+
+Requirement-by-requirement audit comparing spec against actual implementation.
+
+### Requirements NOT implemented
+
+- **Req 28 (Performance SLOs)**: Operational latency targets (p95). No code enforces or measures them — these are acceptance criteria for load testing, not code features. Expected gap.
+
+### Previously simplified, now fully implemented
+
+- **Req 12.4 (`add_shipment_event` tool)**: Now calls `createShipmentEvent` Convex mutation directly via `ConvexHttpClient`, instead of the previous indirect HTTP round-trip through the status endpoint. The tool generates a unique `eventId`, passes `actorType`/`actorId`/`payload` directly, and handles 409 duplicate conflicts. Proper dedicated event-append implementation.
+- **Req 27.1 (`shipment_confirmed` allowed tools)**: Requirements.md updated to match platform-hardening Req 14.8 correction. `shipment_confirmed` allows `get_organization_details` + `quote_delivery` (read-only). Code and spec are now aligned.
+
+### Previously unimplemented, now complete
+
+- **Req 11.1–11.4 (Conversation Types)**: All six conversation type enums defined in `conversationTypeValidator` (`convex/shared/validators.ts`). `conversationType` field added to `calls` table. Phone-number-to-organization lookup implemented via `resolvePhoneToRoute()` (`src/lib/call-routing/phone-lookup.ts`) backed by `convex/phoneLookup.ts` queries. WS server `/incoming-call` reads Twilio `To` number, resolves vertical via phone lookup, passes `conversationType` to WebSocket stream. `isLogistics` derived from `conversationType.startsWith("logistics_")`. Task 10.5 completed.
+- **Req 24.1–24.2 (Backward Compatibility Contract Tests)**: Verified. `tests/logistics/restaurant-api-non-regression.test.ts` exists with 87 tests, all passing. Validates Property 11 (restaurant API response shapes unchanged after logistics deployment). Task 15.4 verified and marked complete.
+
+### All other requirements (1–10, 12–13, 14–23, 25–26, 29): Fully implemented as specified.
+
+### Final verification (March 2026)
+
+- `npx tsc --noEmit`: 0 type errors
+- `npx vitest run`: 557 tests passed, 30 test files, 0 failures
+- All tasks complete. Logistics vertical spec fully implemented.

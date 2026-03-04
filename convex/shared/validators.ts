@@ -73,6 +73,19 @@ export const parcelValidator = v.object({
   notes: v.optional(v.string()),
 });
 
+// Conversation type for voice agent call routing
+// Requirements: 11.1, 11.2
+export const conversationTypeValidator = v.union(
+  // Restaurant conversation types
+  v.literal("restaurant_inbound_order"),
+  v.literal("restaurant_followup"),
+  v.literal("restaurant_cancellation"),
+  // Logistics conversation types
+  v.literal("logistics_booking"),
+  v.literal("logistics_followup"),
+  v.literal("logistics_failure_notice")
+);
+
 // Proof of delivery
 export const proofOfDeliveryValidator = v.object({
   photoUrl: v.optional(v.string()),

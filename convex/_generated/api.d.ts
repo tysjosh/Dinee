@@ -41,6 +41,7 @@ import type * as monitoringAlerts from "../monitoringAlerts.js";
 import type * as monitoringMetrics from "../monitoringMetrics.js";
 import type * as orders from "../orders.js";
 import type * as partners from "../partners.js";
+import type * as phoneLookup from "../phoneLookup.js";
 import type * as platforms from "../platforms.js";
 import type * as prompts from "../prompts.js";
 import type * as restaurants from "../restaurants.js";
@@ -89,6 +90,7 @@ declare const fullApi: ApiFromModules<{
   monitoringMetrics: typeof monitoringMetrics;
   orders: typeof orders;
   partners: typeof partners;
+  phoneLookup: typeof phoneLookup;
   platforms: typeof platforms;
   prompts: typeof prompts;
   restaurants: typeof restaurants;

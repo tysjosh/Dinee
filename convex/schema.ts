@@ -11,6 +11,7 @@ import {
   addressValidator,
   parcelValidator,
   proofOfDeliveryValidator,
+  conversationTypeValidator,
 } from "./shared/validators";
 
 export default defineSchema({
@@ -81,7 +82,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_branch_id", ["branchId"])
-    .index("by_restaurant_id", ["restaurantId"]),
+    .index("by_restaurant_id", ["restaurantId"])
+    .index("by_phone_number", ["phoneNumber"]),
 
   // Restaurant (extended for multi-tenancy)
   restaurants: defineTable({
@@ -137,6 +139,8 @@ export default defineSchema({
     fallbackTriggered: v.optional(v.boolean()), // Whether fallback was triggered
     // Logistics vertical: vertical discriminator
     vertical: v.optional(verticalValidator),
+    // Conversation type for voice agent routing (Req 11.1, 11.2, 11.3, 11.4)
+    conversationType: v.optional(conversationTypeValidator),
     // Req 17.7: Voice session correlation ID for end-to-end tracing (Req 7.1: v.optional for backward compat)
     correlationId: v.optional(v.string()),
   })
@@ -839,11 +843,14 @@ export default defineSchema({
     geo: v.object({ lat: v.number(), lng: v.number() }),
     isActive: v.boolean(),
     operatingHours: v.object({}),
+    // Phone number for inbound call routing (Req 11.3)
+    phoneNumber: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_location_id", ["locationId"])
     .index("by_organization_id", ["organizationId"])
-    .index("by_city_state", ["city", "state"]),
+    .index("by_city_state", ["city", "state"])
+    .index("by_phone_number", ["phoneNumber"]),
 
   // Logistics: Shipments (parcel lifecycle tracking)
   // Requirements: 4.1, 4.2, 4.9

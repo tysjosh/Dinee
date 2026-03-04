@@ -41,6 +41,7 @@ import {
 import twilio from "twilio";
 import { createLogger } from "../../lib/logger.ts";
 import { generateCorrelationId } from "../../lib/logistics/correlation.ts";
+import { resolvePhoneToRoute, type ConversationType } from "../../lib/call-routing/phone-lookup.ts";
 
 const logger = createLogger("ws-server");
 
@@ -116,15 +117,16 @@ fastify.all("/incoming-call", async (request: any, reply) => {
     }
   }
   
-  // Detect vertical from request (defaults to "restaurant" for backward compatibility)
-  const vertical = request.body?.Vertical || request.query?.vertical || "restaurant";
+  // Resolve vertical from called number via phone-number-to-organization lookup (Req 11.3)
+  const toNumber = request.body?.To || request.query?.To || "";
+  const route = await resolvePhoneToRoute(convexClient, toNumber);
 
   // Pass call context via query params to the WebSocket connection
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
     <Pause length="1"/>
     <Connect>
-    <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}&amp;vertical=${encodeURIComponent(vertical)}" />
+    <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}&amp;to=${encodeURIComponent(toNumber)}&amp;conversationType=${encodeURIComponent(route.conversationType)}" />
     </Connect>
     </Response>
   `;
@@ -185,8 +187,8 @@ fastify.register(async (fastify) => {
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const callSid = url.searchParams.get("callSid") || "";
     const fromNumber = url.searchParams.get("from") || "";
-    const vertical = url.searchParams.get("vertical") || "restaurant";
-    const isLogistics = vertical === "logistics";
+    const conversationType = (url.searchParams.get("conversationType") || "restaurant_inbound_order") as ConversationType;
+    const isLogistics = conversationType.startsWith("logistics_");
     
     // Connection-specific state
     let streamSid: string | null = null;
@@ -420,7 +422,11 @@ fastify.register(async (fastify) => {
       const sessionPrompt = isLogistics ? LOGISTICS_SYSTEM_PROMPT : SYSTEM_PROMPT;
       const transcriptionPrompt = isLogistics
         ? "Expect words related to logistics, shipments, delivery, tracking, addresses, and rider dispatch."
-        : "Expect words related to restaurant orders, food items, phone numbers, and customer service.";
+        : conversationType === "restaurant_cancellation"
+          ? "Expect words related to restaurant orders, cancellations, refunds, and customer service."
+          : conversationType === "restaurant_followup"
+            ? "Expect words related to restaurant orders, follow-ups, order status, and customer service."
+            : "Expect words related to restaurant orders, food items, phone numbers, and customer service.";
 
       oaWs.send(
         JSON.stringify({
@@ -777,6 +783,8 @@ fastify.register(async (fastify) => {
         phoneNumber: fromNumber,
         status: "active",
         restaurantId: "unknown",
+        // Req 11.3: Store conversationType on the calls table record
+        conversationType,
         // Req 17.7: Store correlationId on the calls table record for voice sessions
         ...(correlationId && { correlationId }),
       });

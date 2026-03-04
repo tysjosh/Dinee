@@ -19,6 +19,7 @@ export const createLocation = mutation({
     geo: v.object({ lat: v.number(), lng: v.number() }),
     isActive: v.boolean(),
     operatingHours: v.object({}),
+    phoneNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Atomic check: query by_location_id index for uniqueness
@@ -52,6 +53,7 @@ export const createLocation = mutation({
       geo: args.geo,
       isActive: args.isActive,
       operatingHours: args.operatingHours,
+      phoneNumber: args.phoneNumber,
       createdAt: Date.now(),
     });
 

@@ -388,7 +388,7 @@ This document defines the requirements for adding a logistics vertical alongside
 
 #### Acceptance Criteria
 
-1. THE System SHALL define allowed tools per logistics call phase: await_org_verification phase allows only `get_organization_details`; org_verified phase allows `create_shipment` and `quote_delivery`; shipment_open phase allows `update_shipment`, `assign_rider`, and `add_shipment_event`; shipment_confirmed phase allows only `add_shipment_event`
+1. THE System SHALL define allowed tools per logistics call phase: await_org_verification phase allows only `get_organization_details`; org_verified phase allows `get_organization_details`, `create_shipment`, and `quote_delivery`; shipment_open phase allows `get_organization_details`, `create_shipment`, `quote_delivery`, `update_shipment`, `assign_rider`, and `add_shipment_event`; shipment_confirmed phase allows only `get_organization_details` and `quote_delivery` (read-only; no mutations permitted). _Updated per platform-hardening Req 14.8._
 2. WHEN the Voice_Agent attempts to invoke a tool not allowed in the current logistics call phase, THE System SHALL reject the tool invocation and instruct the agent to complete the current phase first
 3. THE System SHALL use the `isToolAllowed` and `nextPhase` pattern from `src/app/ws-server/call-phase.ts` for logistics call phase management
 4. THE System SHALL prevent shipment creation or modification tools from executing before the org_verified phase is reached

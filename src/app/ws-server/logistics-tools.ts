@@ -284,7 +284,17 @@ export async function wrapperAssignRider(shipmentId: string, riderId: string, co
  * @param payload - Event payload
  * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
-export async function wrapperAddShipmentEvent(
+export /**
+ * Voice tool: Append an event to the shipment event log.
+ *
+ * Calls the Convex `createShipmentEvent` mutation directly instead of
+ * going through the HTTP status endpoint. This is a proper implementation
+ * of Req 12.4 — a dedicated event-append tool, not a side effect of
+ * status transitions.
+ *
+ * @requirements 12.4
+ */
+async function wrapperAddShipmentEvent(
   shipmentId: string,
   eventType: string,
   payload: Record<string, unknown>,
@@ -299,53 +309,57 @@ export async function wrapperAddShipmentEvent(
 
   try {
     const result = await withRetry("add_shipment_event", async () => {
-      const headers: Record<string, string> = {
-        "x-api-key": process.env.INTERNAL_API_KEY || "",
-      };
-      if (correlationId) headers["X-Correlation-Id"] = correlationId;
-
-      // First, get the current shipment to know its status
-      const getResponse = await fetch(
-        `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}`,
-        { headers }
-      );
-      const shipmentData = await getResponse.json();
-
-      if (!getResponse.ok || !shipmentData?.data) {
-        throw new Error("Failed to retrieve shipment for event logging");
+      const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+      if (!convexUrl) {
+        throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
       }
 
-      const postHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.INTERNAL_API_KEY || "",
-      };
-      if (correlationId) postHeaders["X-Correlation-Id"] = correlationId;
+      // Lazy imports — avoids breaking test files that import utility functions
+      // from this module but don't need the Convex client
+      const { ConvexHttpClient } = require("convex/browser");
+      const { api } = require("../../convex/_generated/api.js");
+      const convexClient = new ConvexHttpClient(convexUrl);
 
-      // Post to the status endpoint with event metadata.
-      // The status endpoint creates shipment events as side effects.
-      const response = await fetch(
-        `${NEXT_APP_URL}/api/v1/logistics/shipments/${encodeURIComponent(shipmentId)}/status`,
+      const eventId = `evt_${shipmentId}_${eventType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      const payloadWithCorrelation = correlationId
+        ? { ...payload, correlationId }
+        : payload;
+
+      const mutationResult = await convexClient.mutation(
+        api.logistics.shipmentEvents.createShipmentEvent,
         {
-          method: "POST",
-          headers: postHeaders,
-          body: JSON.stringify({
-            newStatus: shipmentData.data.deliveryStatus,
-            actorType: payload.actorType || "agent",
-            actorId: payload.actorId || "voice-agent",
-          }),
+          eventId,
+          shipmentId,
+          eventType,
+          actorType: (payload.actorType as "system" | "agent" | "rider" | "merchant") || "agent",
+          actorId: (payload.actorId as string) || "voice-agent",
+          payload: JSON.stringify(payloadWithCorrelation),
+          createdAt: Date.now(),
         }
       );
-      return await response.json();
+
+      return { success: true, data: { eventId, shipmentId, eventType, ...mutationResult } };
     });
+
     if (correlationId) {
       logger.info("Voice tool: add_shipment_event completed", { shipmentId, eventType, correlationId });
     }
     return result;
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    // Surface 409 conflicts (duplicate eventId) as a clear message
+    if (message.includes("409")) {
+      logger.warn("Duplicate shipment event", { shipmentId, eventType, ...(correlationId && { correlationId }) });
+      return { success: false, error: "This event has already been recorded." };
+    }
+
     logger.error("Failed to add shipment event", { error, shipmentId, eventType, ...(correlationId && { correlationId }) });
     return { success: false, error: "Sorry, I could not add the shipment event right now. Please try again shortly." };
   }
 }
+
 
 /**
  * Returns a delivery cost and ETA estimate based on service type.

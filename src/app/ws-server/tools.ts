@@ -12,6 +12,8 @@ interface CallData {
   phoneNumber?: string | null;
   status?: "active" | "completed";
   orderId?: string;
+  /** Req 11.3: Conversation type for call routing */
+  conversationType?: string;
   /** Req 17.7: Voice session correlation ID */
   correlationId?: string;
 }
