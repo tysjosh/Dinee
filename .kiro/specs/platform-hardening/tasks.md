@@ -170,6 +170,28 @@ Incremental hardening of the Dinee platform across schema, authorization, idempo
 - [x] 11. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
+- [x] 11.5. Organization details real lookup and conversation-subtype prompts
+  - [x] 11.5.1 Implement `wrapperGetOrganizationDetails` in `src/app/ws-server/logistics-tools.ts`
+    - Real Convex lookup via lazy `require()` imports for `ConvexHttpClient` and `api`
+    - Queries `api.logistics.organizations.getOrganization` by organizationId
+    - Returns org name, vertical, platformId, settings on success; error if not found
+    - Wrapped with `withRetry` for transient error resilience
+    - _Requirements: 15.1, 15.2, 15.3, 15.5_
+  - [x] 11.5.2 Replace `get_organization_details` stub in `src/app/ws-server/index.ts`
+    - Replaced synthetic stub with call to `wrapperGetOrganizationDetails(args.organization_id, correlationId)`
+    - Phase transition to `org_verified` only occurs when `output.success` is true
+    - _Requirements: 15.1, 15.2, 15.3, 15.4_
+  - [x] 11.5.3 Add conversation-subtype-aware logistics system prompts
+    - `logistics_booking`: Focus on booking new shipments, collecting sender/recipient details, quoting delivery
+    - `logistics_followup`: Focus on checking existing shipment status, updating shipments, tracking, rider management
+    - `logistics_failure_notice`: Focus on delivery failure notification, re-attempt options, rescheduling
+    - Prompt selected based on `conversationType` variable
+    - _Requirements: 11.1, 11.2, 11.3, 11.4_
+  - [x] 11.5.4 Add logistics-subtype-aware transcription hints
+    - Each logistics subtype gets tailored transcription hints matching its domain vocabulary
+    - Restaurant subtypes were already differentiated
+    - _Requirements: 11.1, 11.4_
+
 - [x] 12. Webhook HMAC-SHA256 signing
   - [x] 12.1 Implement `signWebhookPayload` in `src/lib/partner-api/webhook-service.ts`
     - Compute HMAC-SHA256 of `${timestamp}.${body}` using subscriber's webhook secret
@@ -312,3 +334,9 @@ Incremental hardening of the Dinee platform across schema, authorization, idempo
 - Property tests validate universal correctness properties from the design document
 - All new fields on existing tables use `v.optional()` per Req 7.1 to avoid breaking existing data
 - The design uses TypeScript throughout, matching the existing codebase
+
+## Audit Notes (March 2026)
+
+- **Req 15 (Organization Details Real Lookup)**: Fully implemented in Task 11.5. `wrapperGetOrganizationDetails` performs real Convex lookup, stub in index.ts replaced. Phase transition gated on success.
+- **Conversation-subtype prompts**: Implemented in Task 11.5.3. Three specialized logistics prompts (`logistics_booking`, `logistics_followup`, `logistics_failure_notice`) replace the single generic prompt. Transcription hints also differentiated per subtype.
+- All 557 tests pass, 0 type errors on main tsconfig.

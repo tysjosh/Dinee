@@ -396,3 +396,75 @@ export function wrapperQuoteDelivery(
     currency: "NGN",
   };
 }
+
+/**
+ * Voice tool: Look up a logistics organization by ID via Convex.
+ *
+ * Performs a real database lookup against the `organizations` table,
+ * replacing the previous stub that returned synthetic data.
+ *
+ * @requirements Platform-hardening Req 15.1, 15.2, 15.3
+ */
+export async function wrapperGetOrganizationDetails(
+  organizationId: string,
+  correlationId?: string
+): Promise<unknown> {
+  if (!organizationId) {
+    return { success: false, error: "Organization ID is required" };
+  }
+
+  try {
+    const result = await withRetry("get_organization_details", async () => {
+      const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+      if (!convexUrl) {
+        throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+      }
+
+      // Lazy imports to avoid breaking test files that import utility functions
+      const { ConvexHttpClient } = require("convex/browser");
+      const { api } = require("../../convex/_generated/api.js");
+      const convexClient = new ConvexHttpClient(convexUrl);
+
+      const organization = await convexClient.query(
+        api.logistics.organizations.getOrganization,
+        { organizationId }
+      );
+
+      if (!organization) {
+        return {
+          success: false,
+          error: `Organization '${organizationId}' not found. Please verify the ID and try again.`,
+        };
+      }
+
+      return {
+        success: true,
+        organization: {
+          organizationId: organization.organizationId,
+          name: organization.name,
+          vertical: organization.vertical,
+          platformId: organization.platformId,
+          settings: organization.settings,
+        },
+      };
+    });
+
+    if (correlationId) {
+      logger.info("Voice tool: get_organization_details completed", {
+        organizationId,
+        correlationId,
+      });
+    }
+    return result;
+  } catch (error) {
+    logger.error("Failed to get organization details", {
+      error,
+      organizationId,
+      ...(correlationId && { correlationId }),
+    });
+    return {
+      success: false,
+      error: "Sorry, I could not look up the organization right now. Please try again shortly.",
+    };
+  }
+}

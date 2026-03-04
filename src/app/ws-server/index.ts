@@ -37,6 +37,7 @@ import {
   wrapperAssignRider,
   wrapperAddShipmentEvent,
   wrapperQuoteDelivery,
+  wrapperGetOrganizationDetails,
 } from "./logistics-tools.ts";
 import twilio from "twilio";
 import { createLogger } from "../../lib/logger.ts";
@@ -341,7 +342,18 @@ fastify.register(async (fastify) => {
         },
       ];
 
-      const LOGISTICS_SYSTEM_PROMPT = `You are an AI logistics agent handling calls for a delivery and shipping company. Your name is Jordan. At the start of the conversation, greet the caller and ask for their organization ID to verify their company. Once verified, you can help them book shipments, get delivery quotes, and manage existing shipments. Keep responses short, professional, and to the point.`;
+      // Conversation-subtype-aware logistics prompts
+      const LOGISTICS_BOOKING_PROMPT = `You are an AI logistics agent named Jordan handling calls for a delivery and shipping company. Your primary goal is to help the caller book a new shipment. At the start of the conversation, greet the caller and ask for their organization ID to verify their company. Once verified, collect the sender and recipient details (name, phone, address, city, state), parcel information (type, weight), and preferred service type (same_day, next_day, express, scheduled). Offer a delivery quote before confirming the shipment. Keep responses short, professional, and to the point.`;
+
+      const LOGISTICS_FOLLOWUP_PROMPT = `You are an AI logistics agent named Jordan handling calls for a delivery and shipping company. The caller is following up on an existing shipment. At the start of the conversation, greet the caller and ask for their organization ID to verify their company. Once verified, help them check shipment status, update shipment details, track deliveries, or manage rider assignments. If they need to modify a shipment, confirm the changes before applying them. Keep responses short, professional, and to the point.`;
+
+      const LOGISTICS_FAILURE_NOTICE_PROMPT = `You are an AI logistics agent named Jordan handling calls for a delivery and shipping company. You are calling to notify the customer about a delivery failure. At the start of the conversation, greet the caller and ask for their organization ID to verify their company. Once verified, explain the delivery failure reason clearly and offer options: re-attempt delivery, reschedule for a different time, or cancel the shipment. Be empathetic but efficient. Keep responses short, professional, and to the point.`;
+
+      const LOGISTICS_SYSTEM_PROMPT = conversationType === "logistics_followup"
+        ? LOGISTICS_FOLLOWUP_PROMPT
+        : conversationType === "logistics_failure_notice"
+          ? LOGISTICS_FAILURE_NOTICE_PROMPT
+          : LOGISTICS_BOOKING_PROMPT;
 
       // Restaurant tool definitions (existing)
       const restaurantTools = [
@@ -421,7 +433,11 @@ fastify.register(async (fastify) => {
       const sessionTools = isLogistics ? logisticsTools : restaurantTools;
       const sessionPrompt = isLogistics ? LOGISTICS_SYSTEM_PROMPT : SYSTEM_PROMPT;
       const transcriptionPrompt = isLogistics
-        ? "Expect words related to logistics, shipments, delivery, tracking, addresses, and rider dispatch."
+        ? conversationType === "logistics_followup"
+          ? "Expect words related to logistics, shipment tracking, delivery status, shipment updates, and rider assignments."
+          : conversationType === "logistics_failure_notice"
+            ? "Expect words related to delivery failure, re-attempt, rescheduling, cancellation, and shipment issues."
+            : "Expect words related to logistics, shipments, delivery booking, sender and recipient addresses, parcel details, and rider dispatch."
         : conversationType === "restaurant_cancellation"
           ? "Expect words related to restaurant orders, cancellations, refunds, and customer service."
           : conversationType === "restaurant_followup"
@@ -632,9 +648,8 @@ fastify.register(async (fastify) => {
               // Req 17.2: Pass correlationId to all tool calls during the session
               switch (toolName) {
                 case "get_organization_details":
-                  // Org lookup — for now return a stub; real implementation would query Convex
-                  output = { success: true, organization: { id: args.organization_id, name: "Organization " + args.organization_id } };
-                  logisticsPhase = nextLogisticsPhase(logisticsPhase, "org_verified");
+                  output = await wrapperGetOrganizationDetails(args.organization_id, correlationId) as Record<string, unknown>;
+                  if (output.success) logisticsPhase = nextLogisticsPhase(logisticsPhase, "org_verified");
                   break;
                 case "create_shipment":
                   output = await wrapperCreateShipment(args, correlationId) as Record<string, unknown>;
