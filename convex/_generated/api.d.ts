@@ -15,6 +15,7 @@ import type {
 } from "convex/server";
 import type * as apiKeys from "../apiKeys.js";
 import type * as apiUsageLogs from "../apiUsageLogs.js";
+import type * as billingEvents from "../billingEvents.js";
 import type * as branchCapacity from "../branchCapacity.js";
 import type * as branches from "../branches.js";
 import type * as callbackSessions from "../callbackSessions.js";
@@ -71,6 +72,7 @@ import type * as webhookSubscriptions from "../webhookSubscriptions.js";
 declare const fullApi: ApiFromModules<{
   apiKeys: typeof apiKeys;
   apiUsageLogs: typeof apiUsageLogs;
+  billingEvents: typeof billingEvents;
   branchCapacity: typeof branchCapacity;
   branches: typeof branches;
   callbackSessions: typeof callbackSessions;

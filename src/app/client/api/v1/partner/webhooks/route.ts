@@ -14,6 +14,7 @@ import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
 import type { ApiErrorResponse, ApiSuccessResponse, WebhookEventType } from '@/lib/partner-api/types';
 import crypto from 'crypto';
 
@@ -130,6 +131,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: "",
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/webhooks",
+      method: "GET",
+      statusCode: 200,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {
@@ -252,6 +263,16 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiSucces
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: body.tenantId ?? "",
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/webhooks",
+      method: "POST",
+      statusCode: 201,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {

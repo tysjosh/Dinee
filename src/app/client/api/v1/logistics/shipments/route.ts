@@ -15,6 +15,7 @@ import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { authorizeLogisticsAccess } from '@/lib/logistics/authorization';
 import { isLogisticsEnabled } from '@/lib/logistics/feature-gate';
 import { getOrCreateRequestId } from '@/lib/logistics/correlation';
+import { withModuleGuard } from '@/lib/modules/withModuleGuard';
 import { checkIdempotency, storeIdempotencyResult, storeIdempotencyFailure, hashRequestBody } from '@/lib/logistics/idempotency';
 import { dispatchLogisticsWebhookEvent } from '@/lib/logistics/webhook-dispatch';
 import { createLogger } from '@/lib/logger';
@@ -301,7 +302,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // GET — List Shipments
 // ============================================================================
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export const GET = withModuleGuard("logistics_pack")(async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = getOrCreateRequestId(request.headers);
 
   // 1. Auth
@@ -418,4 +419,4 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       { status: 500, headers: { 'X-Request-Id': requestId } }
     );
   }
-}
+});

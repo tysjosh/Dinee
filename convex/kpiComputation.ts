@@ -1,27 +1,211 @@
 /**
  * Internal KPI computation action for scheduled daily snapshots.
- * Called by the cron scheduler to compute and store KPI metrics.
+ * Computes real metrics per the definitions in docs/kpi-metric-definitions.md.
  *
- * Requirements: 15.6
+ * Requirements: REQ-6.2
  */
 
-import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
+import { query } from "./_generated/server";
+import { v } from "convex/values";
 import { api } from "./_generated/api";
+import { verticalValidator } from "./shared/validators";
 
-const VERTICALS = [
+type Vertical = "general_services" | "healthcare" | "legal" | "hospitality" | "logistics" | "restaurant";
+
+const VERTICALS: Vertical[] = [
   "general_services",
   "healthcare",
   "legal",
   "hospitality",
   "logistics",
   "restaurant",
-] as const;
+];
 
-const METRICS = [
-  "active_tenant_count",
-  "churn_rate",
-] as const;
+// ============================================================================
+// Internal queries used by the computation action
+// ============================================================================
+
+/**
+ * Returns active tenant count: businesses with ≥1 call in the given window, per vertical.
+ */
+export const getActiveTenantCount = query({
+  args: { vertical: verticalValidator, windowStart: v.number(), windowEnd: v.number() },
+  handler: async (ctx, args) => {
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .withIndex("by_vertical", (q) => q.eq("vertical", args.vertical))
+      .collect();
+
+    let count = 0;
+    for (const r of restaurants) {
+      const calls = await ctx.db
+        .query("calls")
+        .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", r.restaurantId))
+        .collect();
+      const hasCallInWindow = calls.some(
+        (c) => (c.callStartTime ?? c._creationTime) >= args.windowStart &&
+               (c.callStartTime ?? c._creationTime) < args.windowEnd
+      );
+      if (hasCallInWindow) count++;
+    }
+    return count;
+  },
+});
+
+/**
+ * Returns call volume and total minutes for a day, per vertical.
+ */
+export const getCallMetrics = query({
+  args: { vertical: verticalValidator, periodStart: v.number(), periodEnd: v.number() },
+  handler: async (ctx, args) => {
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .withIndex("by_vertical", (q) => q.eq("vertical", args.vertical))
+      .collect();
+    const restaurantIds = new Set(restaurants.map((r) => r.restaurantId));
+
+    const allCalls = await ctx.db.query("calls").collect();
+    const periodCalls = allCalls.filter((c) => {
+      const t = c.callStartTime ?? c._creationTime;
+      return t >= args.periodStart && t < args.periodEnd && c.restaurantId && restaurantIds.has(c.restaurantId);
+    });
+
+    let totalDurationSeconds = 0;
+    for (const call of periodCalls) {
+      totalDurationSeconds += call.duration ?? 0;
+    }
+
+    return {
+      callVolume: periodCalls.length,
+      callMinutes: Math.round((totalDurationSeconds / 60) * 100) / 100,
+    };
+  },
+});
+
+/**
+ * Returns call-to-outcome conversion rate for a day, per vertical.
+ */
+export const getConversionRate = query({
+  args: { vertical: verticalValidator, periodStart: v.number(), periodEnd: v.number() },
+  handler: async (ctx, args) => {
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .withIndex("by_vertical", (q) => q.eq("vertical", args.vertical))
+      .collect();
+    const restaurantIds = new Set(restaurants.map((r) => r.restaurantId));
+
+    const allCalls = await ctx.db.query("calls").collect();
+    const completedCalls = allCalls.filter((c) => {
+      const t = c.callStartTime ?? c._creationTime;
+      return t >= args.periodStart && t < args.periodEnd &&
+             c.status === "completed" &&
+             c.restaurantId && restaurantIds.has(c.restaurantId);
+    });
+
+    const allOrders = await ctx.db.query("orders").collect();
+    const ordersFromCalls = allOrders.filter((o) => {
+      const t = o.orderPlacementTime ?? o._creationTime;
+      return t >= args.periodStart && t < args.periodEnd &&
+             o.callId && restaurantIds.has(o.restaurantId);
+    });
+
+    if (completedCalls.length === 0) return 0;
+    return Math.round((ordersFromCalls.length / completedCalls.length) * 10000) / 10000;
+  },
+});
+
+/**
+ * Returns integration attach rate (runsheet connected / total) per vertical.
+ */
+export const getIntegrationAttachRate = query({
+  args: { vertical: verticalValidator },
+  handler: async (ctx, args) => {
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .withIndex("by_vertical", (q) => q.eq("vertical", args.vertical))
+      .collect();
+
+    if (restaurants.length === 0) return 0;
+
+    const connected = restaurants.filter(
+      (r) => r.integrations?.runsheet?.status === "connected"
+    ).length;
+
+    return Math.round((connected / restaurants.length) * 10000) / 10000;
+  },
+});
+
+// ============================================================================
+// ARPA + Churn queries (Phase C)
+// ============================================================================
+
+/**
+ * Returns ARPA (Average Revenue Per Account) for a monthly period per vertical.
+ */
+export const getArpa = query({
+  args: { vertical: verticalValidator, periodStart: v.number(), periodEnd: v.number() },
+  handler: async (ctx, args) => {
+    // Get active subscriptions for this vertical
+    const allSubscriptions = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+    const verticalSubscriptions = allSubscriptions.filter((s) => (s.vertical ?? "restaurant") === args.vertical);
+
+    if (verticalSubscriptions.length === 0) return 0;
+
+    // Sum paid invoices in period
+    const allInvoices = await ctx.db
+      .query("subscriptionInvoices")
+      .withIndex("by_status", (q) => q.eq("status", "paid"))
+      .collect();
+    const periodInvoices = allInvoices.filter(
+      (inv) => inv.paidAt && inv.paidAt >= args.periodStart && inv.paidAt < args.periodEnd
+    );
+
+    // Match invoices to subscriptions in this vertical
+    const subscriptionIds = new Set(verticalSubscriptions.map((s) => s.subscriptionId));
+    const matchingInvoices = periodInvoices.filter((inv) => subscriptionIds.has(inv.subscriptionId));
+
+    const totalRevenue = matchingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+    return Math.round((totalRevenue / verticalSubscriptions.length) * 100) / 100;
+  },
+});
+
+/**
+ * Returns churn rate for a monthly period per vertical.
+ */
+export const getChurnRate = query({
+  args: { vertical: verticalValidator, periodStart: v.number(), periodEnd: v.number() },
+  handler: async (ctx, args) => {
+    const allSubscriptions = await ctx.db.query("subscriptions").collect();
+
+    // Active at period start: created before periodStart and not cancelled before periodStart
+    const activeAtStart = allSubscriptions.filter((s) => {
+      const v = s.vertical ?? "restaurant";
+      if (v !== args.vertical) return false;
+      if (s.createdAt > args.periodStart) return false;
+      if (s.cancelledAt && s.cancelledAt < args.periodStart) return false;
+      return s.status === "active" || s.status === "cancelled";
+    });
+
+    if (activeAtStart.length === 0) return 0;
+
+    // Cancelled in period
+    const cancelledInPeriod = allSubscriptions.filter((s) => {
+      const v = s.vertical ?? "restaurant";
+      if (v !== args.vertical) return false;
+      return s.cancelledAt && s.cancelledAt >= args.periodStart && s.cancelledAt < args.periodEnd;
+    });
+
+    return Math.round((cancelledInPeriod.length / activeAtStart.length) * 10000) / 10000;
+  },
+});
+
+// ============================================================================
+// Daily snapshot computation action
+// ============================================================================
 
 /**
  * Computes daily KPI snapshots for all verticals and stores them.
@@ -38,24 +222,122 @@ export const computeDailySnapshots = internalAction({
       todayDate.getUTCDate()
     );
     const periodEnd = periodStart + 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = periodStart - 30 * 24 * 60 * 60 * 1000;
 
-    // For each vertical, store a placeholder snapshot for active_tenant_count
-    // In production, this would query actual business data
     for (const vertical of VERTICALS) {
-      for (const metric of METRICS) {
-        const snapshotId = `${metric}_${vertical}_day_${periodStart}`;
+      // active_tenant_count — 30-day rolling window
+      const activeTenants = await ctx.runQuery(api.kpiComputation.getActiveTenantCount, {
+        vertical,
+        windowStart: thirtyDaysAgo,
+        windowEnd: periodEnd,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `active_tenant_count_${vertical}_day_${periodStart}`,
+        metricName: "active_tenant_count",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: activeTenants,
+        metadata: JSON.stringify({ computedAt: now }),
+      });
 
-        await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
-          snapshotId,
-          metricName: metric,
-          vertical,
-          periodType: "day",
-          periodStart,
-          periodEnd,
-          value: 0, // Actual computation would query business/call data
-          metadata: JSON.stringify({ computedAt: now }),
-        });
-      }
+      // call_volume + call_minutes
+      const callMetrics = await ctx.runQuery(api.kpiComputation.getCallMetrics, {
+        vertical,
+        periodStart,
+        periodEnd,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `call_volume_${vertical}_day_${periodStart}`,
+        metricName: "call_volume",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: callMetrics.callVolume,
+        metadata: JSON.stringify({ computedAt: now }),
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `call_minutes_${vertical}_day_${periodStart}`,
+        metricName: "call_minutes",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: callMetrics.callMinutes,
+        metadata: JSON.stringify({ computedAt: now }),
+      });
+
+      // call_to_outcome_conversion
+      const conversionRate = await ctx.runQuery(api.kpiComputation.getConversionRate, {
+        vertical,
+        periodStart,
+        periodEnd,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `call_to_outcome_conversion_${vertical}_day_${periodStart}`,
+        metricName: "call_to_outcome_conversion",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: conversionRate,
+        metadata: JSON.stringify({ computedAt: now }),
+      });
+
+      // integration_attach_rate
+      const attachRate = await ctx.runQuery(api.kpiComputation.getIntegrationAttachRate, {
+        vertical,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `integration_attach_rate_${vertical}_day_${periodStart}`,
+        metricName: "integration_attach_rate",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: attachRate,
+        metadata: JSON.stringify({ computedAt: now }),
+      });
+
+      // arpa — monthly, but we store daily snapshots for trend
+      const monthStart = Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth(), 1);
+      const nextMonth = todayDate.getUTCMonth() === 11
+        ? Date.UTC(todayDate.getUTCFullYear() + 1, 0, 1)
+        : Date.UTC(todayDate.getUTCFullYear(), todayDate.getUTCMonth() + 1, 1);
+      const arpa = await ctx.runQuery(api.kpiComputation.getArpa, {
+        vertical,
+        periodStart: monthStart,
+        periodEnd: nextMonth,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `arpa_${vertical}_day_${periodStart}`,
+        metricName: "arpa",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: arpa,
+        metadata: JSON.stringify({ computedAt: now, monthStart, monthEnd: nextMonth }),
+      });
+
+      // churn_rate — monthly
+      const churnRate = await ctx.runQuery(api.kpiComputation.getChurnRate, {
+        vertical,
+        periodStart: monthStart,
+        periodEnd: nextMonth,
+      });
+      await ctx.runMutation(api.kpiSnapshots.storeSnapshot, {
+        snapshotId: `churn_rate_${vertical}_day_${periodStart}`,
+        metricName: "churn_rate",
+        vertical,
+        periodType: "day",
+        periodStart,
+        periodEnd,
+        value: churnRate,
+        metadata: JSON.stringify({ computedAt: now, monthStart, monthEnd: nextMonth }),
+      });
     }
   },
 });

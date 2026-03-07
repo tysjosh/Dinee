@@ -8,9 +8,9 @@ import ModuleActivation from "@/components/onboarding/ModuleActivation";
 import IntegrationSetup, {
   type RunsheetConfig,
 } from "@/components/onboarding/IntegrationSetup";
-import RestaurantSetup from "@/components/onboarding/RestaurantSetup";
-import RestaurantIdDisplay from "@/components/onboarding/VirtualNumberGenerator";
-import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
+import BusinessSetup from "@/components/onboarding/BusinessSetup";
+import BusinessIdDisplay from "@/components/onboarding/VirtualNumberGenerator";
+import { useBusinessStorage } from "@/hooks/useBusinessStorage";
 import { MinimalHeader } from "@/components/ui/Header";
 import type { Vertical } from "@/lib/modules/types";
 
@@ -27,7 +27,7 @@ type OnboardingStep =
  *
  * Flow:
  * 1. Business Type Selection (vertical picker)
- * 2. Business Setup (name, agent, language — reuses RestaurantSetup)
+ * 2. Business Setup (name, agent, language — uses BusinessSetup)
  * 3. Module Activation (enable packs for selected vertical)
  * 4. Integration Setup (conditional — Runsheet Connect for logistics)
  * 5. Virtual Number / Business ID display
@@ -37,7 +37,7 @@ type OnboardingStep =
  */
 export default function OnboardingPage() {
   const router = useRouter();
-  const { restaurantId } = useRestaurantStorage();
+  const { businessId: restaurantId } = useBusinessStorage();
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("business-type");
   const [generatedBusinessId, setGeneratedBusinessId] = useState("");
   const [selectedVertical, setSelectedVertical] = useState<Vertical | undefined>();
@@ -113,7 +113,7 @@ export default function OnboardingPage() {
         );
 
       case "business-setup":
-        return <RestaurantSetup onComplete={handleBusinessSetup} vertical={selectedVertical} />;
+        return <BusinessSetup onComplete={handleBusinessSetup} vertical={selectedVertical} />;
 
       case "module-activation":
         return (
@@ -166,7 +166,7 @@ export default function OnboardingPage() {
 
       case "restaurant-id":
         return (
-          <RestaurantIdDisplay
+          <BusinessIdDisplay
             restaurantId={generatedBusinessId}
             onComplete={handleComplete}
           />

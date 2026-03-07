@@ -5,7 +5,8 @@ import { LANGUAGE_OPTIONS } from "@/lib/constants";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
-import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
+import { useBusinessStorage } from "@/hooks/useBusinessStorage";
+import { useEnabledModules } from "@/hooks/useEnabledModules";
 
 export interface SettingsSectionProps {
   tabId: "settings";
@@ -14,12 +15,12 @@ export interface SettingsSectionProps {
 const SettingsSection: React.FC<SettingsSectionProps> = () => {
   const router = useRouter();
   const {
-    restaurantId,
-    restaurantData,
+    businessId: restaurantId,
+    businessData: restaurantData,
     loading,
-    saveRestaurantData,
+    saveBusinessData: saveRestaurantData,
     deleteAllData,
-  } = useRestaurantStorage();
+  } = useBusinessStorage();
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [isLoading, setSaveLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -29,6 +30,9 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
     text: string;
   } | null>(null);
   const hasInitialized = useRef(false);
+  const { isModuleActive } = useEnabledModules();
+  const showMenuManagement = isModuleActive("restaurant_pack");
+  const showRunsheetConnect = isModuleActive("runsheet_connect");
 
   // Initialize local state with current restaurant data
   useEffect(() => {
@@ -314,6 +318,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
             </div>
           </div>
 
+          {showMenuManagement && (
           <div>
             <label className="block text-sm font-medium text-white mb-2">
               Menu Details
@@ -392,6 +397,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
               re-upload your menu through the onboarding process.
             </p>
           </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-white mb-2">

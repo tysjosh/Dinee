@@ -135,7 +135,7 @@ export default function Home() {
             Voice AI agents
           </h1>
           <h2 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent font-display leading-tight">
-            for restaurants
+            for your business
           </h2>
         </motion.div>
 
@@ -145,9 +145,9 @@ export default function Home() {
           transition={{ duration: 0.8, delay: 0.8 }}
           className="text-gray-400 text-center max-w-2xl text-base md:text-lg leading-relaxed mb-8 px-4"
         >
-          Automate your restaurant&apos;s phone orders with intelligent AI
-          agents that understand your menu, take orders accurately, and
-          integrate seamlessly with your operations.
+          Automate your business phone calls with intelligent AI agents that
+          understand your services, handle inquiries accurately, and integrate
+          seamlessly with your operations.
         </motion.p>
 
         <motion.div

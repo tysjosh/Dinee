@@ -14,6 +14,7 @@ import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -23,6 +24,7 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/typ
 interface BranchResponse {
   branchId: string;
   restaurantId: string;
+  businessId: string;
   name: string;
   address: string;
   phoneNumber: string;
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   try {
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams;
-    const restaurantIdFilter = searchParams.get('restaurantId');
+    const restaurantIdFilter = searchParams.get('businessId') || searchParams.get('restaurantId');
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const perPage = Math.min(100, Math.max(1, parseInt(searchParams.get('perPage') || '20', 10)));
     
@@ -137,6 +139,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
         allBranches.push({
           branchId: branch.branchId,
           restaurantId: branch.restaurantId,
+          businessId: branch.restaurantId,
           name: branch.name,
           address: branch.address,
           phoneNumber: branch.phoneNumber,
@@ -156,6 +159,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: restaurantIdFilter ?? "",
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/branches",
+      method: "GET",
+      statusCode: 200,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {

@@ -4,8 +4,14 @@
 
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
 import { conversationTypeValidator } from "./shared/validators";
+
+/** Generate a simple unique billing event ID */
+function generateBillingEventId(prefix: string): string {
+  return `be_${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
 
 export const getRestaurantAndMenuDetailsUsingId = query({
@@ -92,6 +98,10 @@ export const upsertCallData = mutation({
       conversationType: v.optional(conversationTypeValidator),
       // Req 17.7: Voice session correlation ID for end-to-end tracing
       correlationId: v.optional(v.string()),
+      // REQ-4.4: Attribution fields
+      source_platform: v.optional(v.string()),
+      source_tenant: v.optional(v.string()),
+      external_reference_id: v.optional(v.string()),
     })
   },
   handler: async (ctx, args) => {
@@ -108,6 +118,34 @@ export const upsertCallData = mutation({
       // Add new query when the callid is being added for the first time
       if (!callDataResponse) {
         await ctx.db.insert("calls", { ...args.data, callStartTime: Date.now() })
+
+        // Dispatch webhook: call.started
+        if (args.data.restaurantId) {
+          await ctx.scheduler.runAfter(0, internal.webhookDeliveries.dispatchWebhookEvent, {
+            eventType: args.data.status === "completed" ? "call.completed" : "call.started",
+            businessId: args.data.restaurantId,
+            payload: JSON.stringify({ callId: args.data.callId, restaurantId: args.data.restaurantId, status: args.data.status }),
+          });
+        }
+
+        // Emit billing event if inserted with status "completed"
+        if (args.data.status === "completed" && args.data.restaurantId) {
+          const restaurant = await ctx.db
+            .query("restaurants")
+            .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.data.restaurantId!))
+            .first();
+          const vertical = restaurant?.vertical ?? "restaurant";
+          await ctx.db.insert("billingEvents", {
+            eventId: generateBillingEventId("call"),
+            businessId: args.data.restaurantId,
+            vertical: vertical as "restaurant" | "logistics" | "healthcare" | "legal" | "hospitality" | "general_services",
+            eventType: "call_completed",
+            durationSeconds: 0,
+            sourcePlatform: args.data.source_platform,
+            createdAt: Date.now(),
+          });
+        }
+
         return {
           success: true,
           message: "Data upserts successfully"
@@ -116,7 +154,39 @@ export const upsertCallData = mutation({
 
       // Update the existing call data
       const { _id: tableCallId } = callDataResponse
+      const previousStatus = callDataResponse.status;
       await ctx.db.patch(tableCallId, args.data)
+
+      // Dispatch webhook: call.completed when status changes to completed
+      if (args.data.status === "completed" && previousStatus !== "completed" && args.data.restaurantId) {
+        await ctx.scheduler.runAfter(0, internal.webhookDeliveries.dispatchWebhookEvent, {
+          eventType: "call.completed",
+          businessId: args.data.restaurantId,
+          payload: JSON.stringify({ callId: args.data.callId, restaurantId: args.data.restaurantId, status: "completed" }),
+        });
+      }
+
+      // Emit billing event when status changes to "completed"
+      if (args.data.status === "completed" && previousStatus !== "completed" && args.data.restaurantId) {
+        const restaurant = await ctx.db
+          .query("restaurants")
+          .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.data.restaurantId!))
+          .first();
+        const vertical = restaurant?.vertical ?? "restaurant";
+        const durationSeconds = callDataResponse.callStartTime
+          ? Math.round((Date.now() - callDataResponse.callStartTime) / 1000)
+          : 0;
+        await ctx.db.insert("billingEvents", {
+          eventId: generateBillingEventId("call"),
+          businessId: args.data.restaurantId,
+          vertical: vertical as "restaurant" | "logistics" | "healthcare" | "legal" | "hospitality" | "general_services",
+          eventType: "call_completed",
+          durationSeconds,
+          sourcePlatform: args.data.source_platform,
+          createdAt: Date.now(),
+        });
+      }
+
       return {
         success: true,
         message: "Data upserts successfully"
@@ -182,6 +252,10 @@ export const upsertOrders = mutation({
         v.literal("cancelled")
       ),
       cancellationReason: v.optional(v.string()),
+      // REQ-4.4: Attribution fields
+      source_platform: v.optional(v.string()),
+      source_tenant: v.optional(v.string()),
+      external_reference_id: v.optional(v.string()),
     })
   },
   handler: async (ctx, args) => {
@@ -198,6 +272,30 @@ export const upsertOrders = mutation({
 
       if (!orderResponse) {
         await ctx.db.insert("orders", { ...args.data, orderPlacementTime: Date.now() })
+
+        // Dispatch webhook: order.created
+        await ctx.scheduler.runAfter(0, internal.webhookDeliveries.dispatchWebhookEvent, {
+          eventType: "order.created",
+          businessId: args.data.restaurantId,
+          payload: JSON.stringify({ orderId: args.data.orderId, restaurantId: args.data.restaurantId, status: args.data.status }),
+        });
+
+        // Emit billing event for new order
+        const restaurant = await ctx.db
+          .query("restaurants")
+          .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.data.restaurantId))
+          .first();
+        const vertical = restaurant?.vertical ?? "restaurant";
+        await ctx.db.insert("billingEvents", {
+          eventId: generateBillingEventId("order"),
+          businessId: args.data.restaurantId,
+          vertical: vertical as "restaurant" | "logistics" | "healthcare" | "legal" | "hospitality" | "general_services",
+          eventType: "order_placed",
+          outcome: "order_placed",
+          sourcePlatform: args.data.source_platform,
+          createdAt: Date.now(),
+        });
+
         return {
           success: true,
           message: "Order upserted successfully"
@@ -206,6 +304,14 @@ export const upsertOrders = mutation({
       // Gets the order id
       const { _id: tableOrderId } = orderResponse
       await ctx.db.patch(tableOrderId, { ...args.data })
+
+      // Dispatch webhook: order.updated
+      await ctx.scheduler.runAfter(0, internal.webhookDeliveries.dispatchWebhookEvent, {
+        eventType: "order.updated",
+        businessId: args.data.restaurantId,
+        payload: JSON.stringify({ orderId: args.data.orderId, restaurantId: args.data.restaurantId, status: args.data.status }),
+      });
+
       return {
         success: true,
         message: "Order upserted successfully"

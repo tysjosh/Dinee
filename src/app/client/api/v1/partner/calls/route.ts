@@ -14,6 +14,7 @@ import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -24,6 +25,7 @@ interface CallResponse {
   callId: string;
   orderId?: string;
   restaurantId?: string;
+  businessId?: string;
   branchId?: string;
   phoneNumber?: string;
   callStartTime?: number;
@@ -89,7 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   try {
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams;
-    const restaurantId = searchParams.get('restaurantId');
+    const restaurantId = searchParams.get('businessId') || searchParams.get('restaurantId');
     const branchId = searchParams.get('branchId');
     const status = searchParams.get('status');
     const startDate = searchParams.get('startDate');
@@ -99,7 +101,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     
     if (!restaurantId) {
       return NextResponse.json(
-        { error: 'Bad Request', message: 'restaurantId query parameter is required' },
+        { error: 'Bad Request', message: 'businessId or restaurantId query parameter is required' },
         { status: 400 }
       );
     }
@@ -175,6 +177,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       callId: call.callId,
       orderId: call.orderId,
       restaurantId: call.restaurantId,
+      businessId: call.restaurantId,
       branchId: call.branchId,
       phoneNumber: call.phoneNumber,
       callStartTime: call.callStartTime,
@@ -189,6 +192,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: restaurantId,
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/calls",
+      method: "GET",
+      statusCode: 200,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {

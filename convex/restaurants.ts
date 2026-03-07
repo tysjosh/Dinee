@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
+import { verticalValidator } from "./shared/validators";
 
 // Generate a 5-digit numeric restaurant ID
 function generateRestaurantId(): string {
@@ -301,6 +302,10 @@ export const createRestaurantWithBranches = mutation({
       description: v.optional(v.string()),
     }))),
     virtualNumber: v.optional(v.string()),
+    vertical: v.optional(verticalValidator),
+    enabledModules: v.optional(v.array(v.string())),
+    source_platform: v.optional(v.string()),
+    source_tenant: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Track created resources for potential rollback
@@ -330,6 +335,8 @@ export const createRestaurantWithBranches = mutation({
         languagePreference: args.languagePreference,
         branchCount: 0, // Will be updated after branches are created
         createdAt: Date.now(),
+        ...(args.vertical !== undefined && { vertical: args.vertical }),
+        ...(args.enabledModules !== undefined && { enabledModules: args.enabledModules }),
       });
 
       // Step 3: Prepare branches to create

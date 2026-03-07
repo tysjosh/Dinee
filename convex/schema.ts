@@ -178,6 +178,10 @@ export default defineSchema({
       runsheetSessionId: v.optional(v.string()),
       externalReferenceIds: v.optional(v.array(v.string())),
     })),
+    // NEW: Attribution fields (REQ-4.4)
+    source_platform: v.optional(v.string()),
+    source_tenant: v.optional(v.string()),
+    external_reference_id: v.optional(v.string()),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -275,6 +279,10 @@ export default defineSchema({
     // Logistics vertical: vertical discriminator and location reference
     vertical: v.optional(verticalValidator),
     locationId: v.optional(v.string()),
+    // NEW: Attribution fields (REQ-4.4)
+    source_platform: v.optional(v.string()),
+    source_tenant: v.optional(v.string()),
+    external_reference_id: v.optional(v.string()),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -1018,6 +1026,23 @@ export default defineSchema({
     .index("by_entry_id", ["entryId"])
     .index("by_business_id", ["businessId"])
     .index("by_integration", ["integrationName"]),
+
+  // Billing Events (REQ-5.1)
+  // Per-call/per-order billing events for usage aggregation
+  billingEvents: defineTable({
+    eventId: v.string(),
+    businessId: v.string(),
+    vertical: verticalValidator,
+    eventType: v.union(v.literal("call_completed"), v.literal("order_placed")),
+    durationSeconds: v.optional(v.number()),
+    outcome: v.optional(v.string()),
+    sourcePlatform: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_business_id", ["businessId"])
+    .index("by_vertical", ["vertical"])
+    .index("by_created_at", ["createdAt"]),
 
   // Webhook Deduplication (Req 8.7)
   // Tracks processed webhook event IDs for idempotent processing

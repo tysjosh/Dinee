@@ -546,6 +546,7 @@ export const API_SCOPES = [
   'shipments:read',
   'shipments:write',
   'riders:write',
+  'businesses:write',
 ] as const;
 
 export type ApiKeyScope = typeof API_SCOPES[number];

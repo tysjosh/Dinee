@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { FormData } from "./RestaurantSetup";
+import type { FormData } from "./BusinessSetup";
 import { AppWindowMac, BadgePlus, ScanLine, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Button from "@/components/ui/Button";

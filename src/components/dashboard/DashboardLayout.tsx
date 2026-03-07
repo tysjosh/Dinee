@@ -4,7 +4,9 @@ import { cn, toTitleCase } from "@/lib/utils";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import SettingsSection from "./SettingsSection";
+import KpiDashboard from "./KpiDashboard";
 import { useEnabledModules } from "@/hooks/useEnabledModules";
+import { useTenant } from "@/contexts/TenantContext";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -21,6 +23,7 @@ export type TabType =
   | "calls"
   | "orders"
   | "shipments"
+  | "kpi"
   | "settings";
 
 export interface TabConfig {
@@ -28,6 +31,18 @@ export interface TabConfig {
   label: string;
   icon: React.ReactNode;
 }
+
+/**
+ * Maps tab IDs to required module IDs.
+ * Tabs without an entry are core tabs (always shown).
+ * REQ-8.2
+ */
+const TAB_MODULE_MAP: Record<string, string> = {
+  orders: "restaurant_pack",
+  shipments: "logistics_pack",
+  riders: "logistics_pack",
+  runsheet: "runsheet_connect",
+};
 
 /**
  * Main dashboard layout component that provides navigation and structure
@@ -42,6 +57,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const skipLinkRef = useRef<HTMLAnchorElement>(null);
   const { isModuleActive } = useEnabledModules();
+  const { state: tenantState } = useTenant();
+  const isPlatformAdmin = tenantState.userRole === "platform_admin";
 
   const tabs: TabConfig[] = useMemo(() => {
     const coreTabs: TabConfig[] = [
@@ -118,8 +135,33 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       });
     }
 
+    // KPI dashboard tab — platform_admin only (REQ-7.4)
+    if (isPlatformAdmin) {
+      coreTabs.push({
+        id: "kpi",
+        label: "KPI Dashboard",
+        icon: (
+          <svg
+            className="w-4 h-4 sm:w-5 sm:h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+            />
+          </svg>
+        ),
+      });
+    }
+
     return coreTabs;
-  }, [isModuleActive]);
+  }, [isModuleActive, isPlatformAdmin]);
 
   const handleKeyDown = (event: React.KeyboardEvent, tabId: TabType) => {
     const currentIndex = tabs.findIndex((tab) => tab.id === tabId);
@@ -323,6 +365,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           })}
 
           {activeTab === "settings" && <SettingsSection tabId="settings" />}
+          {activeTab === "kpi" && isPlatformAdmin && <KpiDashboard tabId="kpi" />}
         </div>
       </main>
     </div>

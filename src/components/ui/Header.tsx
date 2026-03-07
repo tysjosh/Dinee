@@ -27,7 +27,7 @@ export const MinimalHeader: React.FC = () => {
           href={"/client"}
           className={`text-xl font-semibold text-white ${poppins.className}`}
         >
-          DINEE
+          RECEP AI
         </Link>
       </div>
     </header>
@@ -53,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({ onTryNow }) => {
               href={"/client"}
               className={`text-2xl font-bold text-white ${poppins.className}`}
             >
-              DINEE
+              RECEP AI
             </Link>
           </div>
 

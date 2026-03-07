@@ -14,6 +14,7 @@ import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -22,6 +23,7 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/typ
 
 interface RestaurantResponse {
   restaurantId: string;
+  businessId: string;
   platformId: string;
   name: string;
   agentName: string;
@@ -117,6 +119,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Map to response format
     const responseData: RestaurantResponse[] = paginatedRestaurants.map((r: { restaurantId: string; platformId: string; name: string; agentName: string; languagePreference: string; branchCount?: number; createdAt: number }) => ({
       restaurantId: r.restaurantId,
+      businessId: r.restaurantId,
       platformId: r.platformId,
       name: r.name,
       agentName: r.agentName,
@@ -128,6 +131,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: partner.platformId,
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/restaurants",
+      method: "GET",
+      statusCode: 200,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {

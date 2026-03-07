@@ -1,14 +1,9 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import type { Vertical } from "@/lib/modules/types";
-
-/**
- * KPI Dashboard UI with vertical filtering.
- * Displays metrics segmented by vertical with date range support.
- *
- * Requirements: 15.7
- */
 
 interface KpiSnapshot {
   snapshotId: string;
@@ -23,7 +18,7 @@ interface KpiSnapshot {
 }
 
 interface KpiDashboardProps {
-  snapshots: KpiSnapshot[];
+  snapshots?: KpiSnapshot[];
   tabId?: string;
 }
 
@@ -47,48 +42,96 @@ const VERTICAL_LABELS: Record<Vertical, string> = {
 
 const METRIC_LABELS: Record<string, string> = {
   active_tenant_count: "Active Tenants",
-  runsheet_attach_rate: "Runsheet Attach Rate",
-  revenue_per_tenant: "Revenue / Tenant",
-  call_to_outcome_conversion: "Call → Outcome",
+  call_volume: "Call Volume",
+  call_minutes: "Call Minutes",
+  call_to_outcome_conversion: "Conversion Rate",
+  integration_attach_rate: "Integration Attach Rate",
+  arpa: "ARPA",
   churn_rate: "Churn Rate",
 };
 
-const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots }) => {
+const TIME_RANGES = [
+  { label: "7d", days: 7 },
+  { label: "30d", days: 30 },
+  { label: "90d", days: 90 },
+] as const;
+
+type TimeRange = (typeof TIME_RANGES)[number]["days"];
+
+function formatMetricValue(metricName: string, value: number): string {
+  if (metricName === "call_to_outcome_conversion" || metricName === "integration_attach_rate" || metricName === "churn_rate") {
+    return `${(value * 100).toFixed(1)}%`;
+  }
+  if (metricName === "arpa") {
+    return `₦${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  }
+  if (metricName === "call_minutes") {
+    return `${value.toFixed(1)} min`;
+  }
+  return value.toLocaleString();
+}
+
+function computeDelta(current: number, previous: number): { delta: number; label: string } {
+  if (previous === 0) return { delta: 0, label: "—" };
+  const delta = ((current - previous) / previous) * 100;
+  const sign = delta >= 0 ? "+" : "";
+  return { delta, label: `${sign}${delta.toFixed(1)}%` };
+}
+
+const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots: propSnapshots }) => {
   const [selectedVertical, setSelectedVertical] = useState<Vertical | "all">("all");
-  const [selectedPeriod, setSelectedPeriod] = useState<"day" | "week" | "month">("day");
+  const [selectedRange, setSelectedRange] = useState<TimeRange>(30);
+
+  // Query snapshots from Convex for each vertical
+  const queryVertical = selectedVertical === "all" ? "restaurant" : selectedVertical;
+  const convexSnapshots = useQuery(api.kpiSnapshots.getLatestSnapshots, { vertical: queryVertical });
+
+  const snapshots = propSnapshots ?? convexSnapshots ?? [];
+
+  const now = Date.now();
+  const rangeStart = now - selectedRange * 24 * 60 * 60 * 1000;
+  const previousRangeStart = rangeStart - selectedRange * 24 * 60 * 60 * 1000;
 
   const filteredSnapshots = useMemo(() => {
     return snapshots.filter((s) => {
       if (selectedVertical !== "all" && s.vertical !== selectedVertical) return false;
-      if (s.periodType !== selectedPeriod) return false;
-      return true;
+      return s.periodStart >= rangeStart;
     });
-  }, [snapshots, selectedVertical, selectedPeriod]);
+  }, [snapshots, selectedVertical, rangeStart]);
 
-  // Group by metric for display
-  const metricGroups = useMemo(() => {
-    const groups: Record<string, KpiSnapshot[]> = {};
-    for (const s of filteredSnapshots) {
-      if (!groups[s.metricName]) groups[s.metricName] = [];
-      groups[s.metricName].push(s);
-    }
-    return groups;
-  }, [filteredSnapshots]);
+  const previousSnapshots = useMemo(() => {
+    return snapshots.filter((s) => {
+      if (selectedVertical !== "all" && s.vertical !== selectedVertical) return false;
+      return s.periodStart >= previousRangeStart && s.periodStart < rangeStart;
+    });
+  }, [snapshots, selectedVertical, previousRangeStart, rangeStart]);
 
-  const formatValue = (metricName: string, value: number): string => {
-    if (metricName.includes("rate") || metricName.includes("conversion") || metricName.includes("churn")) {
-      return `${value.toFixed(1)}%`;
-    }
-    if (metricName.includes("revenue")) {
-      return `$${value.toFixed(2)}`;
-    }
-    return value.toLocaleString();
-  };
+  // Group by metric, get latest value and previous period value
+  const metricCards = useMemo(() => {
+    const metrics = Object.keys(METRIC_LABELS);
+    return metrics.map((metricName) => {
+      const currentEntries = filteredSnapshots.filter((s) => s.metricName === metricName);
+      const previousEntries = previousSnapshots.filter((s) => s.metricName === metricName);
+
+      const latest = currentEntries.length > 0
+        ? currentEntries.reduce((a, b) => (a.createdAt > b.createdAt ? a : b))
+        : null;
+      const prevLatest = previousEntries.length > 0
+        ? previousEntries.reduce((a, b) => (a.createdAt > b.createdAt ? a : b))
+        : null;
+
+      const currentValue = latest?.value ?? 0;
+      const previousValue = prevLatest?.value ?? 0;
+      const { delta, label: deltaLabel } = computeDelta(currentValue, previousValue);
+
+      return { metricName, currentValue, delta, deltaLabel, hasData: latest !== null };
+    });
+  }, [filteredSnapshots, previousSnapshots]);
 
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 items-center">
         <select
           value={selectedVertical}
           onChange={(e) => setSelectedVertical(e.target.value as Vertical | "all")}
@@ -103,59 +146,45 @@ const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots }) => {
           ))}
         </select>
 
-        <div className="flex rounded-lg border border-white/20 overflow-hidden">
-          {(["day", "week", "month"] as const).map((period) => (
+        <div className="flex rounded-lg border border-white/20 overflow-hidden" role="group" aria-label="Time range">
+          {TIME_RANGES.map((range) => (
             <button
-              key={period}
-              onClick={() => setSelectedPeriod(period)}
+              key={range.days}
+              onClick={() => setSelectedRange(range.days)}
               className={`px-3 py-2 text-sm font-medium transition-colors ${
-                selectedPeriod === period
+                selectedRange === range.days
                   ? "bg-emerald-500/20 text-emerald-400"
                   : "bg-white/5 text-white/60 hover:text-white hover:bg-white/10"
               }`}
             >
-              {period.charAt(0).toUpperCase() + period.slice(1)}
+              {range.label}
             </button>
           ))}
         </div>
       </div>
 
       {/* Metric Cards */}
-      {Object.keys(metricGroups).length === 0 ? (
-        <div className="card-minimal rounded-xl px-6 py-12 text-center">
-          <p className="text-sm text-white/60">No KPI data available for the selected filters.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(metricGroups).map(([metricName, metricSnapshots]) => {
-            const latest = metricSnapshots.reduce((a, b) =>
-              a.createdAt > b.createdAt ? a : b
-            );
-            return (
-              <div key={metricName} className="card-minimal rounded-xl p-4">
-                <p className="text-xs text-white/50 uppercase tracking-wider">
-                  {METRIC_LABELS[metricName] ?? metricName}
-                </p>
-                <p className="text-2xl font-semibold text-white mt-2">
-                  {formatValue(metricName, latest.value)}
-                </p>
-                <div className="flex items-center justify-between mt-3">
-                  <span className="text-xs text-white/40">
-                    {VERTICAL_LABELS[latest.vertical] ?? latest.vertical}
-                  </span>
-                  <span className="text-xs text-white/40">
-                    {new Date(latest.periodStart).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      timeZone: "UTC",
-                    })}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {metricCards.map(({ metricName, currentValue, delta, deltaLabel, hasData }) => (
+          <div key={metricName} className="card-minimal rounded-xl p-4">
+            <p className="text-xs text-white/50 uppercase tracking-wider">
+              {METRIC_LABELS[metricName] ?? metricName}
+            </p>
+            <p className="text-2xl font-semibold text-white mt-2">
+              {hasData ? formatMetricValue(metricName, currentValue) : "—"}
+            </p>
+            <div className="flex items-center mt-2">
+              {hasData && deltaLabel !== "—" ? (
+                <span className={`text-xs font-medium ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {deltaLabel} vs prev {selectedRange}d
+                </span>
+              ) : (
+                <span className="text-xs text-white/30">No comparison data</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

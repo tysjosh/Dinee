@@ -6,17 +6,17 @@ import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { MinimalHeader } from "@/components/ui/Header";
 
-interface RestaurantIdDisplayProps {
+interface BusinessIdDisplayProps {
   restaurantId: string;
   onComplete: () => Promise<void>;
   loading?: boolean;
 }
 
 /**
- * Component that displays the generated restaurant ID and virtual phone number
+ * Component that displays the generated business ID and virtual phone number
  * Shows setup completion status and instructions for customers
  */
-const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
+const BusinessIdDisplay: React.FC<BusinessIdDisplayProps> = ({
   restaurantId,
   onComplete,
   loading = false,
@@ -77,7 +77,7 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
             Setup Complete
           </h1>
           <p className="text-gray-400 text-lg text-minimal">
-            Your restaurant is ready! Customers can now call your new virtual
+            Your business is ready! Customers can now call your new virtual
             number.
           </p>
         </motion.div>
@@ -99,9 +99,9 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
             </div>
           )}
 
-          {/* Restaurant Details */}
+          {/* Business Details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-            {/* Restaurant ID */}
+            {/* Business ID */}
             <div className="text-center">
               <div className="w-12 h-12 mx-auto mb-4 bg-blue-500/10 rounded-full flex items-center justify-center">
                 <svg
@@ -119,7 +119,7 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
                 </svg>
               </div>
               <h3 className="text-sm text-blue-400 mb-2 text-minimal">
-                Restaurant ID
+                Business ID
               </h3>
               <div className="text-2xl text-white font-mono text-minimal">
                 {restaurantId}
@@ -169,7 +169,7 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
                   <span className="text-blue-400 text-xs">2</span>
                 </div>
                 <span>
-                  They enter Restaurant ID:{" "}
+                  They enter Business ID:{" "}
                   <span className="font-mono text-cyan-400">
                     {restaurantId}
                   </span>
@@ -217,7 +217,7 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
           className="text-center"
         >
           <p className="text-sm text-gray-500 text-minimal">
-            Save your Restaurant ID{" "}
+            Save your Business ID{" "}
             <span className="font-mono text-cyan-400">{restaurantId}</span> and
             phone number {PHONE_NUMBER}
           </p>
@@ -227,4 +227,4 @@ const RestaurantIdDisplay: React.FC<RestaurantIdDisplayProps> = ({
   );
 };
 
-export default RestaurantIdDisplay;
+export default BusinessIdDisplay;

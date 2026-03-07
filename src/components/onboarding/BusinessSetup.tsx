@@ -10,7 +10,7 @@ import { MinimalHeader } from "@/components/ui/Header";
 import BranchSetup, { BranchData } from "./BranchSetup";
 import type { Vertical } from "@/lib/modules/types";
 
-export interface RestaurantSetupProps {
+export interface BusinessSetupProps {
   onComplete: (restaurantId: string) => void;
   vertical?: Vertical;
 }
@@ -32,9 +32,18 @@ export interface FormErrors {
   [key: string]: string | undefined;
 }
 
+/** Maps each vertical to its user-facing entity label. */
+const VERTICAL_LABELS: Record<Vertical, string> = {
+  restaurant: "Restaurant",
+  logistics: "Business",
+  healthcare: "Practice",
+  legal: "Firm",
+  hospitality: "Property",
+  general_services: "Business",
+};
+
 const getSteps = (vertical?: Vertical) => {
-  const isRestaurant = !vertical || vertical === "restaurant";
-  const entityLabel = isRestaurant ? "Restaurant" : "Business";
+  const entityLabel = VERTICAL_LABELS[vertical || "restaurant"];
 
   const steps = [
     {
@@ -45,14 +54,14 @@ const getSteps = (vertical?: Vertical) => {
     {
       id: "branches",
       title: "Branch Locations",
-      description: `Add your ${entityLabel.toLowerCase()} branch locations`,
+      description: `Add your ${entityLabel.toLowerCase()}'s office locations`,
     },
     {
       id: "agent-name",
       title: "AI Agent Setup",
       description: "Configure your AI agent",
     },
-    ...(isRestaurant
+    ...(!vertical || vertical === "restaurant"
       ? [
           {
             id: "menu-details",
@@ -108,16 +117,34 @@ const LANGUAGE_OPTIONS: {
   },
 ];
 
+const SPECIAL_INSTRUCTION_EXAMPLES: Record<string, string> = {
+  restaurant:
+    '"Always ask for pickup time", "Mention daily specials", "Check for allergies"',
+  logistics:
+    '"Confirm delivery address", "Ask for package weight", "Mention tracking options"',
+  healthcare:
+    '"Ask about insurance provider", "Confirm appointment date", "Check for medication allergies"',
+  legal:
+    '"Ask about case type", "Confirm consultation availability", "Note urgency level"',
+  hospitality:
+    '"Ask about room preferences", "Mention current promotions", "Check for special occasions"',
+  general_services:
+    '"Ask about preferred time", "Mention available services", "Note special requirements"',
+};
+
+function getSpecialInstructionExamples(vertical?: Vertical): string {
+  return SPECIAL_INSTRUCTION_EXAMPLES[vertical || "restaurant"] || SPECIAL_INSTRUCTION_EXAMPLES.general_services;
+}
+
 /**
- * Multi-step restaurant setup component that guides users through
- * configuring their restaurant information and AI agent settings
+ * Multi-step business setup component that guides users through
+ * configuring their business information and AI agent settings
  * 
  * Requirements: 3.2 - Allows adding multiple branches during initial setup
  */
-const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete, vertical }) => {
+const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) => {
   const { saveRestaurantData } = useRestaurantStorage();
-  const isRestaurant = !vertical || vertical === "restaurant";
-  const entityLabel = isRestaurant ? "Restaurant" : "Business";
+  const entityLabel = VERTICAL_LABELS[vertical || "restaurant"];
   const STEPS = getSteps(vertical);
 
   const [currentStep, setCurrentStep] = useState(0);
@@ -641,8 +668,7 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete, vertical 
                 id="special-instructions-helper"
                 className="mt-2 text-sm text-white/60"
               >
-                Examples: &quot;Always ask for pickup time&quot;, &quot;Mention
-                daily specials&quot;, &quot;Check for allergies&quot;
+                Examples: {getSpecialInstructionExamples(vertical)}
               </p>
             )}
           </div>
@@ -829,4 +855,4 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete, vertical 
   );
 };
 
-export default RestaurantSetup;
+export default BusinessSetup;

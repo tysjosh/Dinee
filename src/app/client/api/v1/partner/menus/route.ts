@@ -14,6 +14,7 @@ import { api } from '../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -23,6 +24,7 @@ import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/typ
 interface MenuItemResponse {
   id: string;
   restaurantId: string;
+  businessId: string;
   branchId?: string;
   name: string;
   price: string;
@@ -85,7 +87,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
   try {
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams;
-    const restaurantId = searchParams.get('restaurantId');
+    const restaurantId = searchParams.get('businessId') || searchParams.get('restaurantId');
     const branchId = searchParams.get('branchId');
     const category = searchParams.get('category');
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
@@ -93,7 +95,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     
     if (!restaurantId) {
       return NextResponse.json(
-        { error: 'Bad Request', message: 'restaurantId query parameter is required' },
+        { error: 'Bad Request', message: 'businessId or restaurantId query parameter is required' },
         { status: 400 }
       );
     }
@@ -137,6 +139,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     const responseData: MenuItemResponse[] = paginatedItems.map((item: { _id: string; restaurantId: string; branchId?: string; name: string; price: string; priceNumeric?: number; description?: string; category?: string; modifiers?: Array<{ name: string; price: number }>; isAvailable?: boolean }) => ({
       id: item._id,
       restaurantId: item.restaurantId,
+      businessId: item.restaurantId,
       branchId: item.branchId,
       name: item.name,
       price: item.price,
@@ -150,6 +153,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Add rate limit headers
     const rateLimitStatus = await checkRateLimit(context.apiKey);
     const headers = getRateLimitHeaders(rateLimitStatus);
+
+    // Audit log (REQ-9.1)
+    logPartnerApiAudit(convexClient, {
+      businessId: restaurantId,
+      partnerId: context.partnerId,
+      endpoint: "/api/v1/partner/menus",
+      method: "GET",
+      statusCode: 200,
+      requestId: context.requestId,
+    });
     
     return NextResponse.json(
       {

@@ -506,6 +506,52 @@ export const getSubscriptionByIdInternal = internalQuery({
 });
 
 // ============================================================================
+// Dispatch Webhook Event (REQ-6.3)
+// Creates delivery records for all matching subscriptions
+// ============================================================================
+
+/**
+ * Internal mutation to dispatch a webhook event to all matching subscriptions.
+ * Queries webhookSubscriptions for active subscriptions whose events array includes eventType.
+ * For each match, inserts a webhookDeliveries record for immediate retry by the cron.
+ */
+export const dispatchWebhookEvent = internalMutation({
+  args: {
+    eventType: v.string(),
+    businessId: v.string(),
+    payload: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Find all active subscriptions that include this event type
+    const allSubscriptions = await ctx.db
+      .query("webhookSubscriptions")
+      .collect();
+
+    const matchingSubscriptions = allSubscriptions.filter(
+      (s) => s.isActive && s.events.includes(args.eventType)
+    );
+
+    let deliveriesCreated = 0;
+    for (const subscription of matchingSubscriptions) {
+      const deliveryId = `whd_${args.eventType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await ctx.db.insert("webhookDeliveries", {
+        deliveryId,
+        subscriptionId: subscription.subscriptionId,
+        eventType: args.eventType,
+        payload: args.payload,
+        attemptCount: 0,
+        success: false,
+        nextRetryAt: Date.now(),
+        createdAt: Date.now(),
+      });
+      deliveriesCreated++;
+    }
+
+    return deliveriesCreated;
+  },
+});
+
+// ============================================================================
 // Dead-Letter and Stats Queries
 // Requirements: 20.4, 20.5
 // ============================================================================

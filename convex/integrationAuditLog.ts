@@ -11,7 +11,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 const ALLOWED_ADMIN_ROLES = ["platform_admin"];
-const ALLOWED_WRITE_ROLES = ["business_owner", "platform_admin"];
+const ALLOWED_WRITE_ROLES = ["business_owner", "platform_admin", "partner"];
 
 const actionTypeValidator = v.union(
   v.literal("create"),
