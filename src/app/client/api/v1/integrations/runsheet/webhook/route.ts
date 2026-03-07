@@ -89,10 +89,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 3. Validate HMAC-SHA256 signature (Req 8.2, 18.7)
   const signature = request.headers.get("x-runsheet-signature") || "";
-  const webhookSecret = process.env.RUNSHEET_WEBHOOK_SECRET;
+
+  // Resolve per-business webhook secret from the database, falling back to env var
+  const businessId = getBusinessId(request);
+  let webhookSecret: string | null = null;
+
+  if (businessId) {
+    const convexClientForSecret = getConvexClient();
+    if (convexClientForSecret) {
+      try {
+        webhookSecret = await convexClientForSecret.query(
+          api.runsheetWebhook.getBusinessWebhookSecret,
+          { businessId }
+        );
+      } catch (err) {
+        console.error("[runsheet-webhook] Failed to fetch per-business secret:", err);
+      }
+    }
+  }
+
+  // Fall back to global env var only if no per-business secret found
+  if (!webhookSecret) {
+    webhookSecret = process.env.RUNSHEET_WEBHOOK_SECRET ?? null;
+  }
 
   if (!webhookSecret) {
-    console.error("[runsheet-webhook] RUNSHEET_WEBHOOK_SECRET not configured");
+    console.error("[runsheet-webhook] No webhook secret configured for business:", businessId);
     return NextResponse.json(
       { error: "Webhook not configured" },
       { status: 500 }

@@ -21,6 +21,30 @@ export const checkDeduplication = query({
       .first();
   },
 });
+/**
+ * Retrieve the per-business webhook secret for Runsheet integration.
+ * Returns the stored webhookSecret or null if not found.
+ *
+ * Requirements: 8.2, 18.7
+ */
+export const getBusinessWebhookSecret = query({
+  args: {
+    businessId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const business = await ctx.db
+      .query("restaurants")
+      .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.businessId))
+      .first();
+
+    if (!business?.integrations?.runsheet?.webhookSecret) {
+      return null;
+    }
+
+    return business.integrations.runsheet.webhookSecret;
+  },
+});
+
 
 /**
  * Record a processed webhook event for deduplication.

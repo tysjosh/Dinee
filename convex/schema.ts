@@ -633,6 +633,7 @@ export default defineSchema({
       v.literal("global"),
       v.literal("platform"),
       v.literal("restaurant"),
+      v.literal("business"),
       v.literal("branch")
     ),
     scopeId: v.optional(v.string()), // platformId, restaurantId, or branchId

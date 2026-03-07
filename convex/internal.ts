@@ -5,6 +5,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Doc } from "./_generated/dataModel";
+import { conversationTypeValidator } from "./shared/validators";
 
 
 export const getRestaurantAndMenuDetailsUsingId = query({
@@ -88,14 +89,7 @@ export const upsertCallData = mutation({
       status: v.optional(v.union(v.literal("active"), v.literal("completed"))),
       orderId: v.optional(v.optional(v.string())),
       // Req 11.3: Conversation type for call routing
-      conversationType: v.optional(v.union(
-        v.literal("restaurant_inbound_order"),
-        v.literal("restaurant_followup"),
-        v.literal("restaurant_cancellation"),
-        v.literal("logistics_booking"),
-        v.literal("logistics_followup"),
-        v.literal("logistics_failure_notice")
-      )),
+      conversationType: v.optional(conversationTypeValidator),
       // Req 17.7: Voice session correlation ID for end-to-end tracing
       correlationId: v.optional(v.string()),
     })

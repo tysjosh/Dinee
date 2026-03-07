@@ -97,13 +97,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
       } else {
         setSaveMessage({
           type: "error",
-          text: "Failed to delete restaurant data. Please try again.",
+          text: "Failed to delete business data. Please try again.",
         });
       }
     } catch (error) {
       setSaveMessage({
         type: "error",
-        text: "Failed to delete restaurant data. Please try again.",
+        text: "Failed to delete business data. Please try again.",
       });
     } finally {
       setIsDeleting(false);
@@ -119,8 +119,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
             <div className="relative">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-700 border-t-emerald-500"></div>
             </div>
-            <p className="text-gray-400 text-sm">
-              Loading restaurant settings...
+            <p className="text-sm text-white/60 mt-1">
+              Loading business settings...
             </p>
           </div>
         </div>
@@ -132,7 +132,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
     return (
       <div className="flex items-center justify-center py-16">
         <div className="bg-black border border-gray-800 rounded-lg p-6 text-center">
-          <p className="text-gray-400 text-sm">No restaurant data available</p>
+          <p className="text-gray-400 text-sm">No business data available</p>
         </div>
       </div>
     );
@@ -199,17 +199,17 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
       <div className="card-minimal rounded-xl">
         <div className="bg-white/5 border-b border-white/10 px-4 sm:px-6 py-4">
           <h2 className="text-base font-semibold text-white">
-            Restaurant Information
+            Business Information
           </h2>
           <p className="text-sm text-white/70 mt-1">
-            Update your restaurant&apos;s basic information.
+            Update your business&apos;s basic information.
           </p>
         </div>
         <div className="px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
             <div>
               <label className="block text-sm font-medium text-white mb-2">
-                Restaurant Name
+                Business Name
                 <span className="text-red-400 ml-1" aria-label="required">
                   *
                 </span>
@@ -218,14 +218,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
                 type="text"
                 value={restaurant.name}
                 onChange={(e) => handleInputChange("name", e.target.value)}
-                placeholder="Enter restaurant name"
+                placeholder="Enter business name"
                 className="w-full px-3 py-2.5 bg-white/5 border border-white/20 rounded-lg text-white text-sm placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200"
                 required
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-white/70 mb-2">
-                Restaurant ID
+                Business ID
               </label>
               <input
                 type="text"
@@ -249,7 +249,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
               className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white/60 text-sm cursor-not-allowed"
             />
             <p className="mt-2 text-sm text-white/50">
-              Customers call this number and provide your Restaurant ID
+              Customers call this number and provide your Business ID
             </p>
           </div>
         </div>
@@ -443,7 +443,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
                 </span>
               </li>
               <li>
-                When prompted, provide Restaurant ID:{" "}
+                When prompted, provide Business ID:{" "}
                 <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
                   {restaurantId}
                 </span>
@@ -540,17 +540,17 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
         <div className="bg-red-500/5 border-b border-red-500/20 px-4 sm:px-6 py-4">
           <h2 className="text-base font-semibold text-red-400">Danger Zone</h2>
           <p className="text-sm text-red-300 mt-1">
-            Permanently delete your restaurant data and reset the system.
+            Permanently delete your business data and reset the system.
           </p>
         </div>
         <div className="px-4 sm:px-6 py-4 sm:py-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex-1">
               <h3 className="text-sm font-medium text-white">
-                Delete Restaurant Data
+                Delete Business Data
               </h3>
               <p className="text-sm text-white/70 mt-1">
-                This will permanently delete all your restaurant data, calls,
+                This will permanently delete all your business data, calls,
                 and orders. This action cannot be undone.
               </p>
             </div>
@@ -573,8 +573,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
         onConfirm={handleDelete}
-        title="Delete Restaurant Data"
-        message={`Are you sure you want to delete all data for restaurant ID "${restaurantId}"? This will permanently delete your restaurant information, all calls, and orders. This action cannot be undone.`}
+        title="Delete Business Data"
+        message={`Are you sure you want to delete all data for business ID "${restaurantId}"? This will permanently delete your business information, all calls, and orders. This action cannot be undone.`}
         confirmText="Delete Everything"
         cancelText="Cancel"
         variant="danger"

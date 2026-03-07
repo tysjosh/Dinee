@@ -8,9 +8,11 @@ import MenuDetails from "./menu-details";
 import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 import { MinimalHeader } from "@/components/ui/Header";
 import BranchSetup, { BranchData } from "./BranchSetup";
+import type { Vertical } from "@/lib/modules/types";
 
 export interface RestaurantSetupProps {
   onComplete: (restaurantId: string) => void;
+  vertical?: Vertical;
 }
 
 export interface FormData {
@@ -30,38 +32,49 @@ export interface FormErrors {
   [key: string]: string | undefined;
 }
 
-const STEPS = [
-  {
-    id: "restaurant-name",
-    title: "Restaurant Information",
-    description: "Tell us about your restaurant",
-  },
-  {
-    id: "branches",
-    title: "Branch Locations",
-    description: "Add your restaurant branch locations",
-  },
-  {
-    id: "agent-name",
-    title: "AI Agent Setup",
-    description: "Configure your AI agent",
-  },
-  {
-    id: "menu-details",
-    title: "Menu Details",
-    description: "Provide your menu information",
-  },
-  {
-    id: "special-instructions",
-    title: "Special Instructions",
-    description: "Add any special handling instructions",
-  },
-  {
-    id: "language-preferences",
-    title: "Language Preferences",
-    description: "Choose your preferred language",
-  },
-];
+const getSteps = (vertical?: Vertical) => {
+  const isRestaurant = !vertical || vertical === "restaurant";
+  const entityLabel = isRestaurant ? "Restaurant" : "Business";
+
+  const steps = [
+    {
+      id: "restaurant-name",
+      title: `${entityLabel} Information`,
+      description: `Tell us about your ${entityLabel.toLowerCase()}`,
+    },
+    {
+      id: "branches",
+      title: "Branch Locations",
+      description: `Add your ${entityLabel.toLowerCase()} branch locations`,
+    },
+    {
+      id: "agent-name",
+      title: "AI Agent Setup",
+      description: "Configure your AI agent",
+    },
+    ...(isRestaurant
+      ? [
+          {
+            id: "menu-details",
+            title: "Menu Details",
+            description: "Provide your menu information",
+          },
+        ]
+      : []),
+    {
+      id: "special-instructions",
+      title: "Special Instructions",
+      description: "Add any special handling instructions",
+    },
+    {
+      id: "language-preferences",
+      title: "Language Preferences",
+      description: "Choose your preferred language",
+    },
+  ];
+
+  return steps;
+};
 
 const LANGUAGE_OPTIONS: {
   value: LanguagePreference;
@@ -101,8 +114,11 @@ const LANGUAGE_OPTIONS: {
  * 
  * Requirements: 3.2 - Allows adding multiple branches during initial setup
  */
-const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
+const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete, vertical }) => {
   const { saveRestaurantData } = useRestaurantStorage();
+  const isRestaurant = !vertical || vertical === "restaurant";
+  const entityLabel = isRestaurant ? "Restaurant" : "Business";
+  const STEPS = getSteps(vertical);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<FormData>({
@@ -132,9 +148,9 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
     switch (currentStepId) {
       case "restaurant-name":
         if (!formData.name.trim()) {
-          newErrors.name = "Restaurant name is required";
+          newErrors.name = `${entityLabel} name is required`;
         } else if (formData.name.trim().length < 2) {
-          newErrors.name = "Restaurant name must be at least 2 characters";
+          newErrors.name = `${entityLabel} name must be at least 2 characters`;
         }
         break;
 
@@ -313,7 +329,7 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
         return (
           <div>
             <label className="block text-sm font-medium text-white/70 mb-3">
-              Restaurant Name
+              {entityLabel} Name
               <span className="text-red-400 ml-1" aria-label="required">
                 *
               </span>
@@ -324,7 +340,7 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 handleInputChange("name", e.target.value)
               }
-              placeholder="Enter your restaurant name"
+              placeholder={`Enter your ${entityLabel.toLowerCase()} name`}
               className={`input-dark w-full px-4 py-3 rounded-lg ${
                 errors.name
                   ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
@@ -706,10 +722,10 @@ const RestaurantSetup: React.FC<RestaurantSetupProps> = ({ onComplete }) => {
           className="text-center"
         >
           <h1 className="text-3xl text-white mb-3 text-minimal">
-            Restaurant Setup
+            {entityLabel} Setup
           </h1>
           <p className="text-white/70 text-minimal">
-            Let&apos;s configure your AI agent for your restaurant
+            Let&apos;s configure your AI agent for your {entityLabel.toLowerCase()}
           </p>
         </motion.div>
 

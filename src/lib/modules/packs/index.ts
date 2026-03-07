@@ -11,6 +11,9 @@
 import { registerRestaurantPack } from "./restaurantPack";
 import { registerLogisticsPack } from "./logisticsPack";
 import { registerGeneralServicesPack } from "./generalServicesPack";
+import { registerHealthcarePack } from "./healthcarePack";
+import { registerLegalPack } from "./legalPack";
+import { registerHospitalityPack } from "./hospitalityPack";
 
 /**
  * Registers all vertical packs with the platform registries.
@@ -20,4 +23,7 @@ export function registerAllPacks(): void {
   registerRestaurantPack();
   registerLogisticsPack();
   registerGeneralServicesPack();
+  registerHealthcarePack();
+  registerLegalPack();
+  registerHospitalityPack();
 }
