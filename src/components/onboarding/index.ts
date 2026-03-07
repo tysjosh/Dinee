@@ -1,3 +1,9 @@
+export { default as BusinessTypeSelection } from "./BusinessTypeSelection";
+export type { BusinessTypeSelectionProps } from "./BusinessTypeSelection";
+export { default as ModuleActivation } from "./ModuleActivation";
+export type { ModuleActivationProps } from "./ModuleActivation";
+export { default as IntegrationSetup } from "./IntegrationSetup";
+export type { IntegrationSetupProps, RunsheetConfig } from "./IntegrationSetup";
 export { default as RestaurantSetup } from "./RestaurantSetup";
 export { default as VirtualNumberGenerator } from "./VirtualNumberGenerator";
 export { default as BranchSetup } from "./BranchSetup";

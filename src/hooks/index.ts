@@ -13,3 +13,5 @@ export type {
   UseVoiceServiceOptions,
   UseVoiceServiceReturn,
 } from './useVoiceService';
+
+export { useEnabledModules } from './useEnabledModules';

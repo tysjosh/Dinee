@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { verticalValidator } from "./shared/validators";
 
 /**
  * Self-serve signup mutations
@@ -209,6 +210,206 @@ export const createRestaurantOwner = mutation({
     }
   },
 });
+
+/**
+ * Create a new business owner account with multi-vertical support.
+ * Extends the createRestaurantOwner pattern for the AI Reception OS pivot.
+ * Requirements: 12.4, 12.6, 12.7, 1.5, 1.6
+ */
+export const createBusinessOwner = mutation({
+  args: {
+    email: v.string(),
+    passwordHash: v.string(),
+    businessName: v.string(),
+    ownerName: v.string(),
+    address: v.string(),
+    phoneNumber: v.string(),
+    city: v.string(),
+    state: v.string(),
+    // Multi-vertical args
+    vertical: v.optional(verticalValidator),
+    enabledModules: v.optional(v.array(v.string())),
+    integrationConfig: v.optional(
+      v.object({
+        apiKey: v.string(),
+        tenantMapping: v.string(), // JSON string: {locationId: runsheetHubId}
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    // Check if email already exists
+    const existingUser = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .first();
+
+    if (existingUser) {
+      throw new Error("An account with this email already exists");
+    }
+
+    const vertical = args.vertical ?? "restaurant";
+    const isRestaurant = vertical === "restaurant";
+
+    // Determine enabledModules — always include "core_platform"
+    const verticalPackMap: Record<string, string> = {
+      restaurant: "restaurant_pack",
+      logistics: "logistics_pack",
+      healthcare: "healthcare_pack",
+      legal: "legal_pack",
+      hospitality: "hospitality_pack",
+      general_services: "general_services_pack",
+    };
+    const defaultPack = verticalPackMap[vertical];
+    let enabledModules = args.enabledModules
+      ? [...args.enabledModules]
+      : ["core_platform", ...(defaultPack ? [defaultPack] : [])];
+
+    // Ensure core_platform is always present
+    if (!enabledModules.includes("core_platform")) {
+      enabledModules = ["core_platform", ...enabledModules];
+    }
+
+    // Generate unique IDs
+    let userId: string;
+    let existingUserId;
+    do {
+      userId = generateUserId();
+      existingUserId = await ctx.db
+        .query("users")
+        .withIndex("by_user_id", (q) => q.eq("userId", userId))
+        .first();
+    } while (existingUserId);
+
+    let restaurantId: string;
+    let existingRestaurant;
+    do {
+      restaurantId = generateRestaurantId();
+      existingRestaurant = await ctx.db
+        .query("restaurants")
+        .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", restaurantId))
+        .first();
+    } while (existingRestaurant);
+
+    let branchId: string;
+    let existingBranch;
+    do {
+      branchId = generateBranchId();
+      existingBranch = await ctx.db
+        .query("branches")
+        .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+        .first();
+    } while (existingBranch);
+
+    // Get or create default platform
+    const platform = await ctx.db
+      .query("platforms")
+      .withIndex("by_platform_id", (q) => q.eq("platformId", "DEFAULT"))
+      .first();
+
+    if (!platform) {
+      await ctx.db.insert("platforms", {
+        platformId: "DEFAULT",
+        name: "Default Platform",
+        settings: {
+          defaultLanguage: "english",
+          enabledPaymentMethods: ["paystack", "flutterwave", "cod"],
+          whatsappEnabled: true,
+          smsEnabled: true,
+        },
+        createdAt: Date.now(),
+      });
+    }
+
+    const platformId = "DEFAULT";
+    const now = Date.now();
+
+    // Determine role and tenantType based on vertical
+    const role = isRestaurant ? "restaurant_owner" : "business_owner";
+    const tenantType = isRestaurant ? "restaurant" : "business";
+
+    try {
+      // Create the user
+      const userDocId = await ctx.db.insert("users", {
+        userId,
+        email: args.email,
+        passwordHash: args.passwordHash,
+        role,
+        tenantType,
+        tenantId: restaurantId,
+        createdAt: now,
+      });
+
+      // Create the business (restaurant) record with vertical and enabledModules
+      const restaurantDocId = await ctx.db.insert("restaurants", {
+        restaurantId,
+        platformId,
+        name: args.businessName,
+        agentName: `${args.businessName} Assistant`,
+        specialInstructions: "",
+        languagePreference: "english",
+        branchCount: 1,
+        createdAt: now,
+        vertical,
+        enabledModules,
+      });
+
+      // For logistics vertical with integration config, patch in the integration data
+      if (
+        vertical === "logistics" &&
+        args.integrationConfig &&
+        enabledModules.includes("runsheet_connect")
+      ) {
+        await ctx.db.patch(restaurantDocId, {
+          integrations: {
+            runsheet: {
+              apiKeyEncrypted: args.integrationConfig.apiKey, // Encryption at API layer
+              apiKeyLast4: args.integrationConfig.apiKey.slice(-4),
+              tenantMapping: args.integrationConfig.tenantMapping,
+              webhookUrl: `/api/v1/integrations/runsheet/webhook/${restaurantId}`,
+              webhookSecret: generateUserId() + generateUserId(), // Random secret
+              status: "connected" as const,
+              failureCount: 0,
+              lastSyncAt: now,
+            },
+          },
+        });
+      }
+
+      // Create the default location (branch)
+      const fullAddress = `${args.address}, ${args.city}, ${args.state}`;
+      const locationLabel = isRestaurant
+        ? `${args.businessName} - Main Branch`
+        : `${args.businessName} - Main Location`;
+
+      const branchDocId = await ctx.db.insert("branches", {
+        branchId,
+        restaurantId,
+        name: locationLabel,
+        address: fullAddress,
+        phoneNumber: args.phoneNumber,
+        operatingHours: getDefaultOperatingHours(),
+        isActive: true,
+        createdAt: now,
+      });
+
+      return {
+        success: true,
+        userId,
+        restaurantId, // Also serves as businessId
+        businessId: restaurantId,
+        branchId,
+        vertical,
+        enabledModules,
+        userDocId,
+        restaurantDocId,
+        branchDocId,
+      };
+    } catch (error) {
+      throw new Error(`Failed to create account: ${(error as Error).message}`);
+    }
+  },
+});
+
 
 /**
  * Submit verification documents for a restaurant owner

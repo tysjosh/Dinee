@@ -45,6 +45,7 @@ import type * as phoneLookup from "../phoneLookup.js";
 import type * as platforms from "../platforms.js";
 import type * as prompts from "../prompts.js";
 import type * as restaurants from "../restaurants.js";
+import type * as runsheetWebhook from "../runsheetWebhook.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as signup from "../signup.js";
 import type * as subscriptions from "../subscriptions.js";
@@ -94,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   platforms: typeof platforms;
   prompts: typeof prompts;
   restaurants: typeof restaurants;
+  runsheetWebhook: typeof runsheetWebhook;
   "shared/validators": typeof shared_validators;
   signup: typeof signup;
   subscriptions: typeof subscriptions;

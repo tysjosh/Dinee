@@ -20,6 +20,7 @@ const featureFlagScopeValidator = v.union(
   v.literal("global"),
   v.literal("platform"),
   v.literal("restaurant"),
+  v.literal("business"),
   v.literal("branch")
 );
 
@@ -64,7 +65,16 @@ const featureFlagNameValidator = v.union(
   v.literal("legacy_api_mode"),
   v.literal("migration_complete"),
   // Logistics features
-  v.literal("logistics_api_enabled")
+  v.literal("logistics_api_enabled"),
+  // Vertical pack flags (Req 6.1)
+  v.literal("restaurant_pack_enabled"),
+  v.literal("logistics_pack_enabled"),
+  v.literal("healthcare_pack_enabled"),
+  v.literal("legal_pack_enabled"),
+  v.literal("hospitality_pack_enabled"),
+  v.literal("general_services_pack_enabled"),
+  // Integration flags
+  v.literal("runsheet_connect_enabled")
 );
 
 /**

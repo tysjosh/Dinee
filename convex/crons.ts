@@ -27,4 +27,16 @@ crons.interval(
   internal.webhookDeliveries.processRetries
 );
 
+/**
+ * Compute daily KPI snapshots for all verticals.
+ * Runs once per day at midnight UTC.
+ *
+ * Requirements: 15.6
+ */
+crons.daily(
+  "compute daily KPI snapshots",
+  { hourUTC: 0, minuteUTC: 5 },
+  internal.kpiComputation.computeDailySnapshots
+);
+
 export default crons;

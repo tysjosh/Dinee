@@ -46,12 +46,14 @@ export default defineSchema({
     role: v.union(
       v.literal("platform_admin"),
       v.literal("restaurant_owner"),
+      v.literal("business_owner"),    // NEW (Req 2.4)
       v.literal("branch_manager"),
       v.literal("supervisor")
     ),
     tenantType: v.union(
       v.literal("platform"),
       v.literal("restaurant"),
+      v.literal("business"),          // NEW (Req 2.5)
       v.literal("branch")
     ),
     tenantId: v.string(),
@@ -85,7 +87,7 @@ export default defineSchema({
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_phone_number", ["phoneNumber"]),
 
-  // Restaurant (extended for multi-tenancy)
+  // Restaurant (extended for multi-tenancy and multi-vertical)
   restaurants: defineTable({
     restaurantId: v.string(), // 5-digit numeric restaurant ID
     platformId: v.string(), // Foreign key to platforms table
@@ -101,9 +103,35 @@ export default defineSchema({
     ),
     branchCount: v.optional(v.number()), // Count of branches for this restaurant
     createdAt: v.number(),
+
+    // NEW: Vertical classification (Req 1.2)
+    vertical: v.optional(verticalValidator), // optional for backward compat; defaults "restaurant" in app logic
+
+    // NEW: Active module packs (Req 1.3)
+    enabledModules: v.optional(v.array(v.string())),
+
+    // NEW: Integration configurations (Req 1.4)
+    integrations: v.optional(v.object({
+      runsheet: v.optional(v.object({
+        apiKeyEncrypted: v.string(),
+        apiKeyLast4: v.string(),
+        tenantMapping: v.string(), // JSON: {locationId: runsheetHubId}
+        webhookUrl: v.string(),
+        webhookSecret: v.string(),
+        lastSyncAt: v.optional(v.number()),
+        status: v.union(
+          v.literal("connected"),
+          v.literal("disconnected"),
+          v.literal("error")
+        ),
+        failureCount: v.optional(v.number()),
+        credentialExpiresAt: v.optional(v.number()),
+      })),
+    })),
   })
     .index("by_restaurant_id", ["restaurantId"])
-    .index("by_platform_id", ["platformId"]),
+    .index("by_platform_id", ["platformId"])
+    .index("by_vertical", ["vertical"]),
 
   // Menu items (extended for multi-tenancy)
   menuItems: defineTable({
@@ -143,6 +171,13 @@ export default defineSchema({
     conversationType: v.optional(conversationTypeValidator),
     // Req 17.7: Voice session correlation ID for end-to-end tracing (Req 7.1: v.optional for backward compat)
     correlationId: v.optional(v.string()),
+    // NEW: Active prompt pack identifier (Req 11.1)
+    workflow_type: v.optional(v.string()),
+    // NEW: Integration-specific metadata (Req 11.2)
+    integration_context: v.optional(v.object({
+      runsheetSessionId: v.optional(v.string()),
+      externalReferenceIds: v.optional(v.array(v.string())),
+    })),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -544,6 +579,13 @@ export default defineSchema({
     failedPaymentCount: v.optional(v.number()),
     lastPaymentAttempt: v.optional(v.number()),
     lastPaymentError: v.optional(v.string()),
+
+    // NEW: Vertical classification (Req 14.6)
+    vertical: v.optional(verticalValidator),
+
+    // NEW: Active paid add-ons (Req 14.6)
+    // e.g. ["restaurant_pack", "runsheet_connect"]
+    addOns: v.optional(v.array(v.string())),
   })
     .index("by_subscription_id", ["subscriptionId"])
     .index("by_restaurant_id", ["restaurantId"])
@@ -934,5 +976,56 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index("by_key_and_partner", ["key", "partnerId"])
+    .index("by_expires_at", ["expiresAt"]),
+
+  // KPI Snapshots (Req 15.6)
+  // Stores periodic KPI metric snapshots with vertical dimension for historical trend analysis
+  kpiSnapshots: defineTable({
+    snapshotId: v.string(),
+    metricName: v.string(),
+    vertical: verticalValidator,
+    periodType: v.union(v.literal("day"), v.literal("week"), v.literal("month")),
+    periodStart: v.number(),
+    periodEnd: v.number(),
+    value: v.number(),
+    metadata: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_snapshot_id", ["snapshotId"])
+    .index("by_metric_and_vertical", ["metricName", "vertical"])
+    .index("by_period", ["periodType", "periodStart"]),
+
+  // Integration Audit Log (Req 18.9)
+  // Immutable audit trail for integration credential lifecycle events
+  integrationAuditLog: defineTable({
+    entryId: v.string(),
+    businessId: v.string(),
+    integrationName: v.string(),
+    actionType: v.union(
+      v.literal("create"),
+      v.literal("rotate"),
+      v.literal("revoke"),
+      v.literal("expire"),
+      v.literal("connect"),
+      v.literal("disconnect")
+    ),
+    actorUserId: v.string(),
+    actorRole: v.string(),
+    details: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_entry_id", ["entryId"])
+    .index("by_business_id", ["businessId"])
+    .index("by_integration", ["integrationName"]),
+
+  // Webhook Deduplication (Req 8.7)
+  // Tracks processed webhook event IDs for idempotent processing
+  webhookDeduplication: defineTable({
+    eventId: v.string(),
+    provider: v.string(),
+    processedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_event_and_provider", ["eventId", "provider"])
     .index("by_expires_at", ["expiresAt"]),
 });

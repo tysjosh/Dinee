@@ -1,7 +1,14 @@
 import { v } from "convex/values";
 
-// Vertical discriminator
-export const verticalValidator = v.union(v.literal("restaurant"), v.literal("logistics"));
+// Vertical discriminator (Req 1.1)
+export const verticalValidator = v.union(
+  v.literal("general_services"),
+  v.literal("healthcare"),
+  v.literal("legal"),
+  v.literal("hospitality"),
+  v.literal("logistics"),
+  v.literal("restaurant")
+);
 
 // Delivery status enum
 export const deliveryStatusValidator = v.union(
@@ -83,7 +90,20 @@ export const conversationTypeValidator = v.union(
   // Logistics conversation types
   v.literal("logistics_booking"),
   v.literal("logistics_followup"),
-  v.literal("logistics_failure_notice")
+  v.literal("logistics_failure_notice"),
+  // General services types (Req 9.4)
+  v.literal("general_appointment_booking"),
+  v.literal("general_service_inquiry"),
+  v.literal("general_callback_request"),
+  // Healthcare types
+  v.literal("healthcare_appointment"),
+  v.literal("healthcare_inquiry"),
+  // Legal types
+  v.literal("legal_consultation"),
+  v.literal("legal_inquiry"),
+  // Hospitality types
+  v.literal("hospitality_reservation"),
+  v.literal("hospitality_inquiry")
 );
 
 // Proof of delivery
