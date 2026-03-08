@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React from "react";
 import { motion } from "motion/react";
 import {
   DashboardLayout,
@@ -12,39 +11,17 @@ import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
 import { toTitleCase } from "@/lib/utils";
 
 /**
- * Main dashboard page that displays restaurant call and order management interface
- * Redirects to onboarding if no restaurant is set up
+ * Main dashboard page that displays restaurant call and order management interface.
+ * Route protection (auth check, onboarding redirect) is handled by AuthGuard
+ * in the client layout — no localStorage-based redirect logic needed here.
  */
 export default function DashboardPage() {
-  const router = useRouter();
-  const { restaurantId, restaurantData, loading } = useRestaurantStorage();
+  const { restaurantData, loading } = useRestaurantStorage();
 
   const restaurantName = restaurantData?.name
     ? toTitleCase(restaurantData.name)
     : "Restaurant Dashboard";
 
-  // Redirect to onboarding if no restaurant ID is found
-  useEffect(() => {
-    if (!loading && !restaurantId) {
-      router.push("/client/onboarding");
-    }
-  }, [loading, restaurantId, router]);
-
-  // Programmatic refresh when coming from onboarding
-  useEffect(() => {
-    if (restaurantId && !loading) {
-      // Check if we're coming from onboarding by checking sessionStorage
-      const fromOnboarding = sessionStorage.getItem("fromOnboarding");
-      if (fromOnboarding === "true") {
-        // Clear the flag
-        sessionStorage.removeItem("fromOnboarding");
-        // Refresh the page to ensure all data is loaded
-        window.location.reload();
-      }
-    }
-  }, [restaurantId, loading]);
-
-  // Show loading state while checking for restaurant ID
   if (loading) {
     return (
       <div className="min-h-screen bg-black text-white">
@@ -70,11 +47,6 @@ export default function DashboardPage() {
         </div>
       </div>
     );
-  }
-
-  // Don't render dashboard if no restaurant ID
-  if (!restaurantId) {
-    return null;
   }
 
   return (

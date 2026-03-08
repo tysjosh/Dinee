@@ -39,4 +39,79 @@ crons.daily(
   internal.kpiComputation.computeDailySnapshots
 );
 
+/**
+ * Check for expired trial subscriptions daily.
+ * Transitions trialing subs where trialEndsAt < now to past_due.
+ *
+ * Requirements: 4.1
+ */
+crons.daily(
+  "check-trial-expiry",
+  { hourUTC: 2, minuteUTC: 0 },
+  internal.subscriptions.checkTrialExpiry
+);
+
+/**
+ * Enforce past_due subscription policy daily.
+ * Cancels subscriptions that have been past_due for 7+ days.
+ *
+ * Requirements: 4.5
+ */
+crons.daily(
+  "enforce-past-due",
+  { hourUTC: 3, minuteUTC: 0 },
+  internal.subscriptions.enforcePastDue
+);
+
+/**
+ * Apply pending plan changes on renewal daily.
+ * Processes subscriptions with pendingPlanId where currentPeriodEnd has passed.
+ *
+ * Requirements: 6.5
+ */
+crons.daily(
+  "apply-pending-plan-changes",
+  { hourUTC: 4, minuteUTC: 0 },
+  internal.subscriptions.applyPendingPlanChanges
+);
+
+/**
+ * Process quarantine expirations every 6 hours.
+ * Transitions expired quarantined numbers to "available" (retain in pool)
+ * or "released" (release back to provider) based on pool levels.
+ *
+ * Requirements: 4.6
+ */
+crons.interval(
+  "process quarantine expirations",
+  { hours: 6 },
+  internal.phoneProvisioning.scheduledFunctions.processQuarantineExpirations
+);
+
+/**
+ * Replenish the phone number pool every hour.
+ * Checks available number counts per region and purchases numbers
+ * to bring pools back to the configured minimum level.
+ *
+ * Requirements: 5.2
+ */
+crons.interval(
+  "replenish number pool",
+  { hours: 1 },
+  internal.phoneProvisioning.scheduledFunctions.replenishNumberPool
+);
+
+/**
+ * Run health checks on assigned phone numbers every 4 hours.
+ * Verifies each assigned number is active and properly configured
+ * at the telecom provider, updating healthStatus accordingly.
+ *
+ * Requirements: 7.2
+ */
+crons.interval(
+  "run phone number health checks",
+  { hours: 4 },
+  internal.phoneProvisioning.scheduledFunctions.runHealthChecks
+);
+
 export default crons;

@@ -4,7 +4,11 @@
  * Resolves an inbound "To" phone number to a vertical and resource,
  * enabling conversation-type selection without query params.
  *
- * Requirements: 11.3 — determine conversation type from called number
+ * Uses the unified getEntityByPhoneNumber query which checks provisioned
+ * dedicated numbers first, then falls back to legacy branch/location
+ * phone number fields.
+ *
+ * Requirements: 11.1, 11.2, 11.3 — determine conversation type from called number
  */
 
 import { ConvexHttpClient } from "convex/browser";
@@ -34,8 +38,12 @@ export interface PhoneLookupResult {
 /**
  * Resolve a phone number to a vertical and default conversation type.
  *
- * Checks branches first (restaurant), then locations (logistics).
- * Falls back to restaurant vertical if no match is found.
+ * Uses the unified getEntityByPhoneNumber query which checks:
+ * 1. Provisioned dedicated numbers (phoneNumbers table) — direct routing, no Business ID
+ * 2. Legacy branch phone numbers — direct routing
+ * 3. Legacy location phone numbers — logistics routing
+ *
+ * Falls back to restaurant vertical if no match (shared number flow with Business ID).
  *
  * @param convexClient - Convex HTTP client
  * @param toNumber - The called phone number (Twilio "To" field)
@@ -47,50 +55,49 @@ export async function resolvePhoneToRoute(
   callbackReason?: string,
 ): Promise<PhoneLookupResult> {
   try {
-    // 1. Check restaurant branches
-    const branch = await convexClient.query(api.phoneLookup.getBranchByPhoneNumber, {
+    // Unified lookup: provisioned numbers → branch phone → location phone
+    const entity = await convexClient.query(api.phoneLookup.getEntityByPhoneNumber, {
       phoneNumber: toNumber,
     });
 
-    if (branch) {
-      const conversationType = resolveRestaurantConversationType(callbackReason);
-      logger.info("Phone resolved to restaurant branch", {
-        toNumber,
-        branchId: branch.branchId,
-        conversationType,
-      });
-      return {
-        vertical: "restaurant",
-        conversationType,
-        restaurantId: branch.restaurantId,
-        branchId: branch.branchId,
-        platformId: branch.platformId,
-      };
+    if (entity) {
+      if (entity.vertical === "restaurant" && entity.type === "branch") {
+        const conversationType = resolveRestaurantConversationType(callbackReason);
+        logger.info("Phone resolved to restaurant branch", {
+          toNumber,
+          branchId: entity.branchId,
+          conversationType,
+          dedicated: entity.phoneNumberId != null,
+        });
+        return {
+          vertical: "restaurant",
+          conversationType,
+          restaurantId: entity.restaurantId,
+          branchId: entity.branchId,
+          platformId: entity.platformId,
+        };
+      }
+
+      if (entity.type === "location") {
+        const conversationType = resolveLogisticsConversationType(callbackReason);
+        logger.info("Phone resolved to logistics location", {
+          toNumber,
+          locationId: entity.locationId,
+          conversationType,
+          dedicated: entity.phoneNumberId != null,
+        });
+        return {
+          vertical: entity.vertical,
+          conversationType,
+          organizationId: entity.organizationId,
+          locationId: entity.locationId,
+          platformId: entity.platformId,
+        };
+      }
     }
 
-    // 2. Check logistics locations
-    const location = await convexClient.query(api.phoneLookup.getLocationByPhoneNumber, {
-      phoneNumber: toNumber,
-    });
-
-    if (location) {
-      const conversationType = resolveLogisticsConversationType(callbackReason);
-      logger.info("Phone resolved to logistics location", {
-        toNumber,
-        locationId: location.locationId,
-        conversationType,
-      });
-      return {
-        vertical: "logistics",
-        conversationType,
-        organizationId: location.organizationId,
-        locationId: location.locationId,
-        platformId: location.platformId,
-      };
-    }
-
-    // 3. Fallback: default to restaurant inbound order
-    logger.warn("Phone number not found in branches or locations, defaulting to restaurant", {
+    // Fallback: default to restaurant inbound order (shared number + Business ID flow)
+    logger.warn("Phone number not found, defaulting to restaurant (shared number flow)", {
       toNumber,
     });
     return {

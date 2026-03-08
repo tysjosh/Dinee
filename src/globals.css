@@ -87,19 +87,19 @@
   --color-danger-900: #7f1d1d;
   --color-danger: #ef4444;
 
-  /* Text colors */
-  --color-text-primary: #1e293b;
-  --color-text-secondary: #64748b;
+  /* Text colors (dark theme) */
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
 
-  /* Background colors */
-  --color-background-primary: #f9fafb;
-  --color-background-surface: #ffffff;
-  --color-background-muted: #f3f4f6;
+  /* Background colors (dark theme) */
+  --color-background-primary: #000000;
+  --color-background-surface: rgba(255, 255, 255, 0.05);
+  --color-background-muted: rgba(255, 255, 255, 0.03);
 
-  /* Border colors */
-  --color-border-default: #e5e7eb;
-  --color-border-light: #f3f4f6;
-  --color-border-dark: #d1d5db;
+  /* Border colors (dark theme) */
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-light: rgba(255, 255, 255, 0.05);
+  --color-border-dark: rgba(255, 255, 255, 0.15);
 
   /* Gray scale for compatibility */
   --color-gray-50: #f9fafb;
@@ -532,7 +532,7 @@
   }
 
   &:active {
-    background-color: var(--color-gray-100);
+    background-color: rgba(255, 255, 255, 0.08);
   }
 }
 
@@ -713,37 +713,37 @@
 }
 
 @utility badge-primary {
-  background-color: var(--color-primary-50);
-  color: var(--color-primary-700);
-  border: 1px solid var(--color-primary-200);
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--color-primary-400);
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 @utility badge-accent {
-  background-color: var(--color-accent-50);
-  color: var(--color-accent-700);
-  border: 1px solid var(--color-accent-200);
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--color-accent-400);
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 @utility badge-success {
-  background-color: var(--color-success-50);
-  color: var(--color-success-700);
-  border: 1px solid var(--color-success-200);
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--color-success-400);
+  border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 @utility badge-warning {
-  background-color: var(--color-warning-50);
-  color: var(--color-warning-700);
-  border: 1px solid var(--color-warning-200);
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--color-warning-400);
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 @utility badge-danger {
-  background-color: var(--color-danger-50);
-  color: var(--color-danger-700);
-  border: 1px solid var(--color-danger-200);
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger-400);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 @utility badge-neutral {
-  background-color: var(--color-background-muted);
+  background-color: rgba(255, 255, 255, 0.08);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border-default);
 }

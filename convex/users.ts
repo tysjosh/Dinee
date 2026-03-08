@@ -5,6 +5,7 @@ import { v } from "convex/values";
 const userRoleValidator = v.union(
   v.literal("platform_admin"),
   v.literal("restaurant_owner"),
+  v.literal("business_owner"),
   v.literal("branch_manager"),
   v.literal("supervisor")
 );
@@ -13,12 +14,13 @@ const userRoleValidator = v.union(
 const tenantTypeValidator = v.union(
   v.literal("platform"),
   v.literal("restaurant"),
+  v.literal("business"),
   v.literal("branch")
 );
 
 // Type definitions
-type UserRole = "platform_admin" | "restaurant_owner" | "branch_manager" | "supervisor";
-type TenantType = "platform" | "restaurant" | "branch";
+type UserRole = "platform_admin" | "restaurant_owner" | "business_owner" | "branch_manager" | "supervisor";
+type TenantType = "platform" | "restaurant" | "business" | "branch";
 
 // Generate a unique user ID (12-character alphanumeric)
 function generateUserId(): string {
@@ -46,7 +48,7 @@ export const createUser = mutation({
     // Check if email already exists
     const existingUser = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("email", (q) => q.eq("email", args.email))
       .first();
 
     if (existingUser) {
@@ -102,7 +104,28 @@ export const getUserByEmail = query({
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("email", (q) => q.eq("email", args.email))
+      .first();
+
+    return user;
+  },
+});
+/**
+ * Get the current authenticated user from the session identity.
+ * Uses ctx.auth.getUserIdentity() to resolve the session, then
+ * looks up the user record by email.
+ */
+export const currentUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity?.email) {
+      return null;
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", identity.email!))
       .first();
 
     return user;
@@ -167,7 +190,7 @@ export const updateUser = mutation({
       const newEmail = args.email;
       const existingUser = await ctx.db
         .query("users")
-        .withIndex("by_email", (q) => q.eq("email", newEmail))
+        .withIndex("email", (q) => q.eq("email", newEmail))
         .first();
 
       if (existingUser) {

@@ -42,6 +42,11 @@ interface PaystackWebhookPayload {
     created_at: string;
     metadata?: {
       orderId?: string;
+      subscriptionId?: string;
+      type?: string;
+      restaurantId?: string;
+      planId?: string;
+      billingCycle?: string;
       [key: string]: unknown;
     };
     customer: {
@@ -50,8 +55,23 @@ interface PaystackWebhookPayload {
       customer_code: string;
       phone?: string;
     };
+    subscription_code?: string;
+    plan?: {
+      plan_code: string;
+      name: string;
+      amount: number;
+      interval: string;
+    };
   };
 }
+
+/**
+ * Subscription-related Paystack event types
+ */
+const SUBSCRIPTION_EVENTS = [
+  "invoice.payment_failed",
+  "subscription.disable",
+] as const;
 
 // ============================================================================
 // Helper Functions
@@ -75,6 +95,35 @@ function getConvexClient(): ConvexHttpClient | null {
     return null;
   }
   return new ConvexHttpClient(convexUrl);
+}
+
+/**
+ * Determine if a webhook event is subscription-related.
+ * 
+ * A charge.success event is subscription-related when its metadata contains
+ * a `subscriptionId` or `type === "subscription"`. Events like
+ * `invoice.payment_failed` and `subscription.disable` are always
+ * subscription-related.
+ * 
+ * @requirements 3.1 - Detect subscription-related events
+ */
+function isSubscriptionEvent(payload: PaystackWebhookPayload): boolean {
+  const eventType = payload.event;
+
+  // invoice.payment_failed and subscription.disable are always subscription events
+  if ((SUBSCRIPTION_EVENTS as readonly string[]).includes(eventType)) {
+    return true;
+  }
+
+  // charge.success is subscription-related when metadata signals a subscription payment
+  if (eventType === "charge.success") {
+    const metadata = payload.data.metadata;
+    if (metadata?.subscriptionId || metadata?.type === "subscription") {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -184,6 +233,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ---- Subscription event routing ----
+  // Detect subscription-related events and route them to the subscription handler
+  // before falling through to the order-based logic.
+  // @requirements 3.1 - Route subscription events to handleSubscriptionWebhook()
+  // @requirements 3.6 - Signature already verified above via PaystackProvider.verifyWebhookSignature()
+  if (isSubscriptionEvent(payload)) {
+    try {
+      await handleSubscriptionWebhook(convexClient, payload);
+
+      // Mark the webhook event as processed
+      await convexClient.mutation(api.webhookEvents.markWebhookEventAsProcessed, {
+        eventId,
+      });
+
+      return NextResponse.json(
+        { message: "Subscription webhook processed successfully" },
+        { status: 200 }
+      );
+    } catch (error) {
+      logger.error(`Paystack webhook: Error processing subscription event ${eventId}`, { eventId, event: payload.event });
+      return NextResponse.json(
+        { error: "Failed to process subscription webhook" },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ---- Order event routing (existing logic) ----
   // Extract order ID from metadata
   const orderId = payload.data.metadata?.orderId;
   
@@ -364,6 +441,196 @@ async function handleRefund(
     throw error;
   }
 }
+
+// ============================================================================
+// Subscription Event Handler
+// ============================================================================
+
+/**
+ * Handle subscription-related webhook events from Paystack.
+ *
+ * Processes:
+ * - `charge.success` with subscription metadata — extend period, set active
+ * - `invoice.payment_failed` — set subscription to past_due
+ * - `subscription.disable` — set subscription to cancelled
+ *
+ * Full implementation in Task 3.2.
+ *
+ * @requirements 3.1 - Handle subscription-related events
+ * @requirements 3.2 - charge.success extends period
+ * @requirements 3.3 - invoice.payment_failed sets past_due
+ * @requirements 3.4 - subscription.disable sets cancelled
+ * @requirements 3.5 - Create invoice records for each event
+ */
+/**
+ * Handle subscription-related webhook events from Paystack.
+ *
+ * Processes:
+ * - `charge.success` with subscription metadata — extend period, set active
+ * - `invoice.payment_failed` — set subscription to past_due
+ * - `subscription.disable` — set subscription to cancelled
+ *
+ * @requirements 3.2 - charge.success extends period and sets active
+ * @requirements 3.3 - invoice.payment_failed sets past_due
+ * @requirements 3.4 - subscription.disable sets cancelled
+ * @requirements 3.5 - Create invoice records for each event
+ */
+async function handleSubscriptionWebhook(
+  convexClient: ConvexHttpClient,
+  payload: PaystackWebhookPayload
+): Promise<void> {
+  const eventType = payload.event;
+  const subscriptionId =
+    payload.data.metadata?.subscriptionId ?? payload.data.subscription_code;
+
+  logger.info(
+    `Paystack webhook: Processing subscription event "${eventType}" for subscription ${subscriptionId}`,
+    { eventType, subscriptionId, reference: payload.data.reference }
+  );
+
+  if (!subscriptionId) {
+    logger.error("Paystack webhook: No subscriptionId found in metadata or subscription_code", {
+      eventType,
+      reference: payload.data.reference,
+    });
+    throw new Error("Missing subscriptionId for subscription webhook event");
+  }
+
+  // Look up the subscription in Convex
+  const subscription = await convexClient.query(
+    api.subscriptions.getSubscription,
+    { subscriptionId }
+  );
+
+  if (!subscription) {
+    logger.error(`Paystack webhook: Subscription ${subscriptionId} not found`, {
+      eventType,
+      subscriptionId,
+    });
+    throw new Error(`Subscription ${subscriptionId} not found`);
+  }
+
+  const now = Date.now();
+  const amountInMajorUnits = payload.data.amount / 100; // Paystack sends amount in kobo
+  const invoiceId = `inv_${payload.data.reference}_${now}`;
+
+  switch (eventType) {
+    case "charge.success": {
+      // Calculate the new period end based on billing cycle
+      const periodExtensionMs =
+        subscription.billingCycle === "yearly"
+          ? 365 * 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000;
+
+      const newPeriodStart = now;
+      const newPeriodEnd = now + periodExtensionMs;
+
+      // Extend subscription period and set status to active
+      await convexClient.mutation(api.subscriptions.updateSubscriptionStatus, {
+        subscriptionId,
+        status: "active",
+        paymentReference: payload.data.reference,
+        currentPeriodStart: newPeriodStart,
+        currentPeriodEnd: newPeriodEnd,
+        failedPaymentCount: 0,
+        lastPaymentAttempt: now,
+      });
+
+      // Create a paid invoice record
+      await convexClient.mutation(api.subscriptions.createInvoice, {
+        invoiceId,
+        subscriptionId,
+        restaurantId: subscription.restaurantId,
+        amount: amountInMajorUnits,
+        currency: payload.data.currency || "NGN",
+        status: "paid",
+        paymentProvider: "paystack",
+        paymentReference: payload.data.reference,
+        periodStart: newPeriodStart,
+        periodEnd: newPeriodEnd,
+        description: `Subscription payment — ${subscription.billingCycle} billing`,
+      });
+
+      logger.info(
+        `Paystack webhook: Subscription ${subscriptionId} renewed — active until ${new Date(newPeriodEnd).toISOString()}`,
+        { subscriptionId, newPeriodEnd }
+      );
+      break;
+    }
+
+    case "invoice.payment_failed": {
+      // Set subscription to past_due and record the failed attempt
+      await convexClient.mutation(api.subscriptions.updateSubscriptionStatus, {
+        subscriptionId,
+        status: "past_due",
+        lastPaymentAttempt: now,
+        lastPaymentError: payload.data.gateway_response || "Payment failed",
+        failedPaymentCount: (subscription.failedPaymentCount ?? 0) + 1,
+      });
+
+      // Create a failed invoice record
+      await convexClient.mutation(api.subscriptions.createInvoice, {
+        invoiceId,
+        subscriptionId,
+        restaurantId: subscription.restaurantId,
+        amount: amountInMajorUnits,
+        currency: payload.data.currency || "NGN",
+        status: "failed",
+        paymentProvider: "paystack",
+        paymentReference: payload.data.reference,
+        periodStart: subscription.currentPeriodStart,
+        periodEnd: subscription.currentPeriodEnd,
+        description: `Failed payment — ${payload.data.gateway_response || "Payment failed"}`,
+      });
+
+      logger.warn(
+        `Paystack webhook: Subscription ${subscriptionId} payment failed — status set to past_due`,
+        {
+          subscriptionId,
+          failedCount: (subscription.failedPaymentCount ?? 0) + 1,
+          gatewayResponse: payload.data.gateway_response,
+        }
+      );
+      break;
+    }
+
+    case "subscription.disable": {
+      // Set subscription to cancelled with cancelledAt timestamp
+      await convexClient.mutation(api.subscriptions.cancelSubscription, {
+        subscriptionId,
+        cancelImmediately: true,
+      });
+
+      // Create a failed invoice record to log the cancellation event
+      await convexClient.mutation(api.subscriptions.createInvoice, {
+        invoiceId,
+        subscriptionId,
+        restaurantId: subscription.restaurantId,
+        amount: amountInMajorUnits,
+        currency: payload.data.currency || "NGN",
+        status: "failed",
+        paymentProvider: "paystack",
+        paymentReference: payload.data.reference,
+        periodStart: subscription.currentPeriodStart,
+        periodEnd: subscription.currentPeriodEnd,
+        description: "Subscription disabled by Paystack",
+      });
+
+      logger.info(
+        `Paystack webhook: Subscription ${subscriptionId} cancelled via subscription.disable`,
+        { subscriptionId }
+      );
+      break;
+    }
+
+    default:
+      logger.warn(`Paystack webhook: Unexpected subscription event type: ${eventType}`, {
+        eventType,
+        subscriptionId,
+      });
+  }
+}
+
 
 // ============================================================================
 // GET Handler (for webhook verification)

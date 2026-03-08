@@ -74,7 +74,9 @@ const featureFlagNameValidator = v.union(
   v.literal("hospitality_pack_enabled"),
   v.literal("general_services_pack_enabled"),
   // Integration flags
-  v.literal("runsheet_connect_enabled")
+  v.literal("runsheet_connect_enabled"),
+  // Phone number provisioning features
+  v.literal("dedicated_numbers_enabled")
 );
 
 /**

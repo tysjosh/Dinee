@@ -3,8 +3,12 @@ import { motion } from "motion/react";
 import { cn, toTitleCase } from "@/lib/utils";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuthActions } from "@convex-dev/auth/react";
 import SettingsSection from "./SettingsSection";
 import KpiDashboard from "./KpiDashboard";
+import BillingDashboardContainer from "./BillingDashboardContainer";
+import BillingReminderBanner from "./BillingReminderBanner";
 import { useEnabledModules } from "@/hooks/useEnabledModules";
 import { useTenant } from "@/contexts/TenantContext";
 
@@ -24,6 +28,7 @@ export type TabType =
   | "orders"
   | "shipments"
   | "kpi"
+  | "billing"
   | "settings";
 
 export interface TabConfig {
@@ -57,8 +62,19 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const skipLinkRef = useRef<HTMLAnchorElement>(null);
   const { isModuleActive } = useEnabledModules();
-  const { state: tenantState } = useTenant();
+  const { state: tenantState, actions: tenantActions } = useTenant();
   const isPlatformAdmin = tenantState.userRole === "platform_admin";
+  const router = useRouter();
+  const { signOut } = useAuthActions();
+
+  const handleSignOut = async () => {
+    await signOut();
+    tenantActions.reset();
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("restaurantId");
+    }
+    router.push("/client/login");
+  };
 
   const tabs: TabConfig[] = useMemo(() => {
     const coreTabs: TabConfig[] = [
@@ -159,6 +175,29 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         ),
       });
     }
+
+    // Billing tab (Req 1.1)
+    coreTabs.push({
+      id: "billing",
+      label: "Billing",
+      icon: (
+        <svg
+          className="w-4 h-4 sm:w-5 sm:h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+          />
+        </svg>
+      ),
+    });
 
     return coreTabs;
   }, [isModuleActive, isPlatformAdmin]);
@@ -292,10 +331,36 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   />
                 </svg>
               </button>
+
+              <button
+                onClick={handleSignOut}
+                className="p-2 text-gray-400 hover:text-white hover:bg-emerald-500/20 rounded-lg transition-all duration-200 cursor-pointer"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
       </header>
+
+      {/* Billing Reminder Banner — shown when past_due or trial ending within 3 days (Req 4.3, 4.4) */}
+      <BillingReminderBanner onNavigateToBilling={() => setActiveTab("billing")} />
 
       <nav
         className="sticky top-16 z-40 bg-black border-b border-gray-800"
@@ -366,6 +431,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
           {activeTab === "settings" && <SettingsSection tabId="settings" />}
           {activeTab === "kpi" && isPlatformAdmin && <KpiDashboard tabId="kpi" />}
+          {activeTab === "billing" && (
+            <BillingDashboardContainer tabId="billing" />
+          )}
         </div>
       </main>
     </div>

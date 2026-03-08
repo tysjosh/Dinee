@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 import {
   verticalValidator,
   deliveryStatusValidator,
@@ -15,6 +16,8 @@ import {
 } from "./shared/validators";
 
 export default defineSchema({
+  // Auth tables required by @convex-dev/auth
+  ...authTables,
   // Platform (multi-tenant support)
   platforms: defineTable({
     platformId: v.string(),
@@ -38,30 +41,41 @@ export default defineSchema({
     enabledVerticals: v.optional(v.array(verticalValidator)),
   }).index("by_platform_id", ["platformId"]),
 
-  // Users (role-based access control)
+  // Users (role-based access control + @convex-dev/auth required fields)
   users: defineTable({
-    userId: v.string(),
-    email: v.string(),
-    passwordHash: v.string(),
-    role: v.union(
+    // @convex-dev/auth required optional fields
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    // Custom app fields (all optional so auth-created users work)
+    userId: v.optional(v.string()),
+    passwordHash: v.optional(v.string()),
+    role: v.optional(v.union(
       v.literal("platform_admin"),
       v.literal("restaurant_owner"),
-      v.literal("business_owner"),    // NEW (Req 2.4)
+      v.literal("business_owner"),
       v.literal("branch_manager"),
       v.literal("supervisor")
-    ),
-    tenantType: v.union(
+    )),
+    tenantType: v.optional(v.union(
       v.literal("platform"),
       v.literal("restaurant"),
-      v.literal("business"),          // NEW (Req 2.5)
+      v.literal("business"),
       v.literal("branch")
-    ),
-    tenantId: v.string(),
+    )),
+    tenantId: v.optional(v.string()),
     lastLoginAt: v.optional(v.number()),
-    createdAt: v.number(),
+    createdAt: v.optional(v.number()),
   })
+    // @convex-dev/auth required indexes
+    .index("email", ["email"])
+    .index("phone", ["phone"])
+    // Custom app indexes
     .index("by_user_id", ["userId"])
-    .index("by_email", ["email"])
     .index("by_tenant", ["tenantType", "tenantId"]),
 
   // Branches (physical locations of restaurants)
@@ -563,6 +577,7 @@ export default defineSchema({
     planId: v.string(),
     status: v.union(
       v.literal("active"),
+      v.literal("pending"),
       v.literal("cancelled"),
       v.literal("past_due"),
       v.literal("trialing")
@@ -594,6 +609,10 @@ export default defineSchema({
     // NEW: Active paid add-ons (Req 14.6)
     // e.g. ["restaurant_pack", "runsheet_connect"]
     addOns: v.optional(v.array(v.string())),
+
+    // Billing integration: scheduled downgrade and cancellation (Req 6.4)
+    pendingPlanId: v.optional(v.string()),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
   })
     .index("by_subscription_id", ["subscriptionId"])
     .index("by_restaurant_id", ["restaurantId"])
@@ -1054,4 +1073,119 @@ export default defineSchema({
   })
     .index("by_event_and_provider", ["eventId", "provider"])
     .index("by_expires_at", ["expiresAt"]),
+
+  // Invitations (team member invites with role assignment)
+  // Requirements: 5.2, 9.1
+  invitations: defineTable({
+    email: v.string(),
+    role: v.union(
+      v.literal("branch_manager"),
+      v.literal("supervisor")
+    ),
+    tenantId: v.string(),
+    invitedBy: v.string(),
+    inviteToken: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("expired"),
+      v.literal("revoked")
+    ),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    acceptedAt: v.optional(v.number()),
+  })
+    .index("by_invite_token", ["inviteToken"])
+    .index("by_email", ["email"])
+    .index("by_tenant_id", ["tenantId"])
+    .index("by_status", ["status"]),
+
+  // Password Reset Tokens (time-limited reset tokens)
+  // Requirements: 5.2, 9.1
+  passwordResetTokens: defineTable({
+    email: v.string(),
+    tokenHash: v.string(),
+    expiresAt: v.number(),
+    used: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_email", ["email"])
+    .index("by_expires_at", ["expiresAt"]),
+
+  // Phone Numbers (dedicated per-branch phone number provisioning)
+  // Requirements: 1.1, 1.2, 1.3, 1.4
+  phoneNumbers: defineTable({
+    numberId: v.string(),
+    phoneNumber: v.string(),
+    provider: v.string(),
+    status: v.union(
+      v.literal("available"),
+      v.literal("assigned"),
+      v.literal("releasing"),
+      v.literal("released"),
+      v.literal("quarantined"),
+      v.literal("failed")
+    ),
+    capabilities: v.array(v.union(
+      v.literal("voice"),
+      v.literal("sms"),
+      v.literal("mms"),
+      v.literal("fax")
+    )),
+    region: v.string(),
+    countryCode: v.string(),
+    createdAt: v.number(),
+    // Assignment fields (optional)
+    assignedToType: v.optional(v.union(v.literal("branch"), v.literal("location"))),
+    assignedToId: v.optional(v.string()),
+    assignedAt: v.optional(v.number()),
+    releasedAt: v.optional(v.number()),
+    // Lifecycle fields (optional)
+    quarantineExpiresAt: v.optional(v.number()),
+    providerNumberSid: v.optional(v.string()),
+    monthlyCost: v.optional(v.number()),
+    currency: v.optional(v.string()),
+    lastHealthCheckAt: v.optional(v.number()),
+    healthStatus: v.optional(v.union(
+      v.literal("healthy"),
+      v.literal("degraded"),
+      v.literal("unreachable")
+    )),
+  })
+    .index("by_number_id", ["numberId"])
+    .index("by_phone_number", ["phoneNumber"])
+    .index("by_status", ["status"])
+    .index("by_assigned_to", ["assignedToType", "assignedToId"])
+    .index("by_provider", ["provider"])
+    .index("by_quarantine_expires", ["quarantineExpiresAt"]),
+
+  // Provisioning Requests (tracking in-flight number acquisition attempts)
+  // Requirements: 1.5, 1.6
+  provisioningRequests: defineTable({
+    requestId: v.string(),
+    branchId: v.optional(v.string()),
+    locationId: v.optional(v.string()),
+    targetType: v.union(v.literal("branch"), v.literal("location")),
+    provider: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("in_progress"),
+      v.literal("completed"),
+      v.literal("failed")
+    ),
+    region: v.string(),
+    countryCode: v.string(),
+    attemptCount: v.number(),
+    maxAttempts: v.number(),
+    lastError: v.optional(v.string()),
+    phoneNumberId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_request_id", ["requestId"])
+    .index("by_branch_id", ["branchId"])
+    .index("by_status", ["status"])
+    .index("by_created_at", ["createdAt"]),
 });

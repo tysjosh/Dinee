@@ -6,11 +6,11 @@ import { OrdersProvider } from "./OrdersContext";
 import { RestaurantProvider } from "./RestaurantContext";
 import { TenantProvider, UserRole } from "./TenantContext";
 import { Toaster } from "@/components/ui/sonner";
-import { useRestaurantStorage } from "@/hooks/useRestaurantStorage";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 interface AppProviderProps {
   children: ReactNode;
-  // Optional tenant configuration for multi-tenant support
+  // Optional overrides — used for testing or SSR scenarios
   initialPlatformId?: string;
   initialBranchId?: string;
   initialRole?: UserRole;
@@ -25,6 +25,10 @@ interface AppProviderProps {
  * - RestaurantProvider: Restaurant-specific data
  * - CallsProvider: Call management state
  * - OrdersProvider: Order management state
+ * 
+ * Tenant resolution is derived from the authenticated user's session
+ * via useCurrentUser(), replacing the previous localStorage-based approach.
+ * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
  */
 export function AppProvider({ 
   children,
@@ -32,18 +36,36 @@ export function AppProvider({
   initialBranchId,
   initialRole,
 }: AppProviderProps) {
-  const { restaurantId } = useRestaurantStorage();
+  const { user, isLoading } = useCurrentUser();
+
+  // Derive tenant identity from the authenticated user's record
+  const resolvedRole: UserRole = (initialRole ?? user?.role ?? 'supervisor') as UserRole;
+
+  const resolvedRestaurantId =
+    (user?.tenantType === 'restaurant' || user?.tenantType === 'business')
+      ? user.tenantId
+      : undefined;
+
+  const resolvedPlatformId =
+    initialPlatformId ?? (user?.tenantType === 'platform' ? user.tenantId : undefined);
+
+  const resolvedBranchId =
+    initialBranchId ?? (user?.tenantType === 'branch' ? user.tenantId : undefined);
+
+  // Use the restaurantId (or empty string) as a stable key so child providers
+  // re-mount when the tenant changes (e.g. after onboarding completes).
+  const tenantKey = resolvedRestaurantId || "no-id";
 
   return (
     <TenantProvider
-      initialPlatformId={initialPlatformId}
-      initialRestaurantId={restaurantId || undefined}
-      initialBranchId={initialBranchId}
-      initialRole={initialRole}
+      initialPlatformId={resolvedPlatformId}
+      initialRestaurantId={resolvedRestaurantId || undefined}
+      initialBranchId={resolvedBranchId}
+      initialRole={resolvedRole}
     >
       <RestaurantProvider>
-        <CallsProvider key={`calls-${restaurantId || "no-id"}`}>
-          <OrdersProvider key={`orders-${restaurantId || "no-id"}`}>
+        <CallsProvider key={`calls-${tenantKey}`}>
+          <OrdersProvider key={`orders-${tenantKey}`}>
             {children}
             <Toaster
               closeButton={true}

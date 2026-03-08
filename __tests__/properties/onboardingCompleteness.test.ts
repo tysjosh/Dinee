@@ -123,3 +123,213 @@ describe("Property 10: Onboarding Completeness", () => {
     );
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Feature: convex-auth-integration, Property 12: Onboarding links user to restaurant
+//
+// Validates: Requirements 7.1
+//
+// For any authenticated user who completes the business setup step in onboarding,
+// the User_Record's tenantId should be updated to match the restaurantId returned
+// by createRestaurantWithBranches().
+// ---------------------------------------------------------------------------
+
+// --- Types mirroring the codebase ---
+
+interface UserRecord {
+  userId: string;
+  email: string;
+  role: string;
+  tenantType: string;
+  tenantId: string;
+}
+
+// --- Pure logic extracted from onboarding page and convex mutations ---
+
+/**
+ * Simulates generateRestaurantId() from convex/restaurants.ts.
+ * Generates a 5-digit numeric string (10000–99999).
+ */
+function simulateGenerateRestaurantId(seed: number): string {
+  const min = 10000;
+  const max = 99999;
+  const id = min + (Math.abs(seed) % (max - min + 1));
+  return id.toString();
+}
+
+/**
+ * Simulates createRestaurantWithBranches() return value.
+ * The mutation returns { success: true, restaurantId, ... }.
+ */
+function simulateCreateRestaurant(restaurantId: string): {
+  success: boolean;
+  restaurantId: string;
+} {
+  return { success: true, restaurantId };
+}
+
+/**
+ * Simulates the updateUser mutation from convex/users.ts.
+ * Patches the user record with the provided fields.
+ */
+function simulateUpdateUser(
+  user: UserRecord,
+  updates: Partial<Pick<UserRecord, "tenantId">>
+): UserRecord {
+  return { ...user, ...updates };
+}
+
+/**
+ * Mirrors the handleBusinessSetup logic in src/app/client/onboarding/page.tsx:
+ *
+ *   const handleBusinessSetup = async (businessId: string) => {
+ *     setGeneratedBusinessId(businessId);
+ *     if (user?.userId && businessId) {
+ *       await updateUser({ userId: user.userId, tenantId: businessId });
+ *     }
+ *     setCurrentStep("module-activation");
+ *   };
+ *
+ * The businessId comes from createRestaurantWithBranches().restaurantId
+ * which is called inside the BusinessSetup component's onComplete callback.
+ */
+function simulateOnboardingBusinessSetup(
+  user: UserRecord,
+  restaurantId: string
+): { updatedUser: UserRecord; linkedRestaurantId: string } {
+  // Step 1: createRestaurantWithBranches returns the restaurantId
+  const createResult = simulateCreateRestaurant(restaurantId);
+
+  // Step 2: handleBusinessSetup calls updateUser with tenantId = businessId
+  const updatedUser = simulateUpdateUser(user, {
+    tenantId: createResult.restaurantId,
+  });
+
+  return { updatedUser, linkedRestaurantId: createResult.restaurantId };
+}
+
+// --- Arbitraries ---
+
+/** Generates a 5-digit numeric restaurant ID matching generateRestaurantId() */
+const restaurantIdArb = fc
+  .integer({ min: 10000, max: 99999 })
+  .map((n) => n.toString());
+
+/** Generates a 12-character alphanumeric userId matching generateUserId() */
+const userIdArb = fc
+  .stringMatching(/^[A-Za-z0-9]{12}$/)
+  .filter((s) => s.length === 12);
+
+/** Generates a valid email */
+const emailArb = fc
+  .tuple(
+    fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9]{1,9}$/),
+    fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9]{1,5}$/),
+    fc.constantFrom("com", "org", "net", "io")
+  )
+  .map(([local, domain, tld]) => `${local}@${domain}.${tld}`);
+
+/**
+ * Generates an authenticated user who has NOT completed onboarding yet.
+ * Per the sign-up flow, new users have role=restaurant_owner,
+ * tenantType=restaurant, tenantId="" (empty).
+ */
+const preOnboardingUserArb: fc.Arbitrary<UserRecord> = fc
+  .tuple(userIdArb, emailArb)
+  .map(([userId, email]) => ({
+    userId,
+    email,
+    role: "restaurant_owner",
+    tenantType: "restaurant",
+    tenantId: "",
+  }));
+
+// --- Tests ---
+
+describe("Property 12: Onboarding links user to restaurant", () => {
+  it("after business setup, user tenantId matches the restaurantId from createRestaurantWithBranches()", () => {
+    fc.assert(
+      fc.property(
+        preOnboardingUserArb,
+        restaurantIdArb,
+        (user, restaurantId) => {
+          const { updatedUser, linkedRestaurantId } =
+            simulateOnboardingBusinessSetup(user, restaurantId);
+
+          // The user's tenantId must equal the restaurantId returned by the mutation
+          expect(updatedUser.tenantId).toBe(restaurantId);
+          expect(updatedUser.tenantId).toBe(linkedRestaurantId);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it("user tenantId is never empty after successful business setup", () => {
+    fc.assert(
+      fc.property(
+        preOnboardingUserArb,
+        restaurantIdArb,
+        (user, restaurantId) => {
+          // Pre-condition: user starts with empty tenantId
+          expect(user.tenantId).toBe("");
+
+          const { updatedUser } = simulateOnboardingBusinessSetup(
+            user,
+            restaurantId
+          );
+
+          // Post-condition: tenantId is non-empty
+          expect(updatedUser.tenantId).not.toBe("");
+          expect(updatedUser.tenantId.length).toBe(5);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it("user role, email, and userId remain unchanged after linking", () => {
+    fc.assert(
+      fc.property(
+        preOnboardingUserArb,
+        restaurantIdArb,
+        (user, restaurantId) => {
+          const { updatedUser } = simulateOnboardingBusinessSetup(
+            user,
+            restaurantId
+          );
+
+          // Only tenantId should change — all other fields stay the same
+          expect(updatedUser.userId).toBe(user.userId);
+          expect(updatedUser.email).toBe(user.email);
+          expect(updatedUser.role).toBe(user.role);
+          expect(updatedUser.tenantType).toBe(user.tenantType);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it("the linked restaurantId is always a valid 5-digit numeric string", () => {
+    fc.assert(
+      fc.property(
+        preOnboardingUserArb,
+        restaurantIdArb,
+        (user, restaurantId) => {
+          const { updatedUser } = simulateOnboardingBusinessSetup(
+            user,
+            restaurantId
+          );
+
+          // restaurantId from generateRestaurantId() is always 5-digit numeric
+          expect(updatedUser.tenantId).toMatch(/^\d{5}$/);
+          const numericId = parseInt(updatedUser.tenantId, 10);
+          expect(numericId).toBeGreaterThanOrEqual(10000);
+          expect(numericId).toBeLessThanOrEqual(99999);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});

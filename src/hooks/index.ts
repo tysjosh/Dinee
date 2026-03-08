@@ -15,3 +15,8 @@ export type {
 } from './useVoiceService';
 
 export { useEnabledModules } from './useEnabledModules';
+export { useCurrentUser } from './useCurrentUser';
+export type { UseCurrentUserResult } from './useCurrentUser';
+
+export { usePlanLimits } from './usePlanLimits';
+export type { LimitCheckResult, UsePlanLimitsReturn } from './usePlanLimits';

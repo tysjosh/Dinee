@@ -97,7 +97,7 @@ export const createRestaurantOwner = mutation({
     // Check if email already exists
     const existingUser = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("email", (q) => q.eq("email", args.email))
       .first();
 
     if (existingUser) {
@@ -240,7 +240,7 @@ export const createBusinessOwner = mutation({
     // Check if email already exists
     const existingUser = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("email", (q) => q.eq("email", args.email))
       .first();
 
     if (existingUser) {
@@ -497,7 +497,7 @@ export const getSignupStatus = query({
       const email = args.email;
       user = await ctx.db
         .query("users")
-        .withIndex("by_email", (q) => q.eq("email", email))
+        .withIndex("email", (q) => q.eq("email", email))
         .first();
     }
 
@@ -535,7 +535,7 @@ export const checkEmailAvailability = query({
   handler: async (ctx, args) => {
     const existingUser = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("email", (q) => q.eq("email", args.email))
       .first();
 
     return {

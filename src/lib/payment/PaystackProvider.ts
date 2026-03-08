@@ -206,16 +206,32 @@ export class PaystackProvider implements PaymentProvider {
   
   constructor(config: PaystackProviderConfig) {
     if (!config.secretKey) {
-      throw new Error("PaystackProvider: secretKey is required");
+      throw new Error(
+        "PaystackProvider: secretKey is required. " +
+        "Set the PAYSTACK_SECRET_KEY environment variable with your Paystack secret key. " +
+        "Get your API key from https://dashboard.paystack.com/#/settings/developers"
+      );
+    }
+
+    if (!config.secretKey.startsWith("sk_test_") && !config.secretKey.startsWith("sk_live_")) {
+      throw new Error(
+        "PaystackProvider: secretKey has an invalid format. " +
+        "Expected a key starting with 'sk_test_' (test mode) or 'sk_live_' (live mode). " +
+        "Check your PAYSTACK_SECRET_KEY environment variable."
+      );
     }
     
     this.secretKey = config.secretKey;
     this.testMode = config.testMode ?? config.secretKey.startsWith("sk_test_");
     this.callbackUrl = config.callbackUrl;
     
-    // Log mode for debugging (only in development)
-    if (process.env.NODE_ENV === "development") {
-      console.log(`PaystackProvider initialized in ${this.testMode ? "TEST" : "LIVE"} mode`);
+    // Warn when running in test mode so developers are aware
+    if (this.testMode) {
+      console.warn(
+        "⚠️ PaystackProvider is running in TEST mode. " +
+        "Transactions will not be charged. " +
+        "Use a live key (sk_live_*) for production."
+      );
     }
   }
   
@@ -507,9 +523,15 @@ export class PaystackProvider implements PaymentProvider {
 /**
  * Create a PaystackProvider instance using environment variables
  * 
+ * Reads PAYSTACK_SECRET_KEY and validates PAYSTACK_PUBLIC_KEY from the environment.
+ * Fails gracefully with clear error messages if either key is missing.
+ * 
  * @param callbackUrl - Optional callback URL for payment completion
  * @returns PaystackProvider instance
- * @throws Error if PAYSTACK_SECRET_KEY environment variable is not set
+ * @throws Error if required environment variables are not set
+ * 
+ * @requirements 8.2 - Fails gracefully with a clear error if env vars are missing
+ * @requirements 8.3 - Test mode is auto-detected from the key prefix
  * 
  * @example
  * ```typescript
@@ -518,11 +540,17 @@ export class PaystackProvider implements PaymentProvider {
  */
 export function createPaystackProvider(callbackUrl?: string): PaystackProvider {
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
-  
-  if (!secretKey) {
+  const publicKey = process.env.PAYSTACK_PUBLIC_KEY;
+
+  const missingVars: string[] = [];
+  if (!secretKey) missingVars.push("PAYSTACK_SECRET_KEY");
+  if (!publicKey) missingVars.push("PAYSTACK_PUBLIC_KEY");
+
+  if (missingVars.length > 0) {
     throw new Error(
-      "PAYSTACK_SECRET_KEY environment variable is required. " +
-      "Get your API key from https://dashboard.paystack.com/#/settings/developers"
+      `Missing required Paystack environment variable(s): ${missingVars.join(", ")}. ` +
+      "Add them to your .env.local file. " +
+      "Get your API keys from https://dashboard.paystack.com/#/settings/developers"
     );
   }
   

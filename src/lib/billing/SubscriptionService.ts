@@ -1,7 +1,7 @@
 /**
  * Subscription Service
  * 
- * Manages subscription billing for restaurants, including plan management,
+ * Manages subscription billing for businesses, including plan management,
  * payment processing, and usage limit checking.
  * 
  * @module billing/SubscriptionService
@@ -42,7 +42,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: 'starter',
     name: 'Starter',
-    description: 'Perfect for small restaurants just getting started with AI-powered call management',
+    description: 'Perfect for small businesses just getting started with AI-powered communication',
     priceMonthly: 15000, // ₦15,000/month
     priceYearly: 150000, // ₦150,000/year (2 months free)
     currency: 'NGN',
@@ -50,7 +50,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       maxBranches: 1,
       maxCallsPerMonth: 500,
       maxOrdersPerMonth: 300,
-      maxMenuItems: 50,
+      maxCatalogItems: 50,
       maxTeamMembers: 3,
     },
     features: {
@@ -72,7 +72,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: 'growth',
     name: 'Growth',
-    description: 'Ideal for growing restaurants with multiple locations and higher call volumes',
+    description: 'Ideal for growing businesses with multiple locations and higher volumes',
     priceMonthly: 35000, // ₦35,000/month
     priceYearly: 350000, // ₦350,000/year (2 months free)
     currency: 'NGN',
@@ -80,7 +80,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       maxBranches: 3,
       maxCallsPerMonth: 2000,
       maxOrdersPerMonth: 1500,
-      maxMenuItems: 150,
+      maxCatalogItems: 150,
       maxTeamMembers: 10,
     },
     features: {
@@ -102,7 +102,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: 'enterprise',
     name: 'Enterprise',
-    description: 'For large restaurant chains requiring unlimited capacity and premium features',
+    description: 'For large organizations requiring unlimited capacity and premium features',
     priceMonthly: 75000, // ₦75,000/month
     priceYearly: 750000, // ₦750,000/year (2 months free)
     currency: 'NGN',
@@ -110,7 +110,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
       maxBranches: -1, // Unlimited
       maxCallsPerMonth: -1, // Unlimited
       maxOrdersPerMonth: -1, // Unlimited
-      maxMenuItems: -1, // Unlimited
+      maxCatalogItems: -1, // Unlimited
       maxTeamMembers: -1, // Unlimited
     },
     features: {
@@ -254,7 +254,7 @@ export class SubscriptionService {
   }
 
   /**
-   * Initialize a new subscription for a restaurant
+   * Initialize a new subscription for a business
    * 
    * @requirements 26.3 - Define subscription plans with feature tiers
    * @requirements 26.4 - Integrate with Paystack/Flutterwave for billing
@@ -295,8 +295,8 @@ export class SubscriptionService {
       trialEndsAt = now + (trialDays * 24 * 60 * 60 * 1000);
       currentPeriodEnd = trialEndsAt;
     } else {
-      // Start with active subscription
-      status = 'active';
+      // Start as pending — only activated after payment is confirmed
+      status = 'pending';
       currentPeriodEnd = calculatePeriodEnd(currentPeriodStart, billingCycle);
     }
 
@@ -438,7 +438,7 @@ export class SubscriptionService {
   }
 
   /**
-   * Check if a restaurant is within its subscription limits
+   * Check if a business is within its subscription limits
    * 
    * @requirements 26.3 - Define subscription plans with feature tiers
    */
@@ -455,14 +455,14 @@ export class SubscriptionService {
           branches: usage.branchCount,
           callsThisMonth: usage.callsThisPeriod,
           ordersThisMonth: usage.ordersThisPeriod,
-          menuItems: usage.menuItemCount,
+          catalogItems: usage.catalogItemCount,
           teamMembers: usage.teamMemberCount,
         },
         limits: {
           maxBranches: 0,
           maxCallsPerMonth: 0,
           maxOrdersPerMonth: 0,
-          maxMenuItems: 0,
+          maxCatalogItems: 0,
           maxTeamMembers: 0,
         },
         exceededLimits: ['Invalid subscription plan'],
@@ -481,8 +481,8 @@ export class SubscriptionService {
     if (!isWithinLimit(usage.ordersThisPeriod, plan.limits.maxOrdersPerMonth)) {
       exceededLimits.push('orders');
     }
-    if (!isWithinLimit(usage.menuItemCount, plan.limits.maxMenuItems)) {
-      exceededLimits.push('menuItems');
+    if (!isWithinLimit(usage.catalogItemCount, plan.limits.maxCatalogItems)) {
+      exceededLimits.push('catalogItems');
     }
     if (!isWithinLimit(usage.teamMemberCount, plan.limits.maxTeamMembers)) {
       exceededLimits.push('teamMembers');
@@ -494,7 +494,7 @@ export class SubscriptionService {
         branches: usage.branchCount,
         callsThisMonth: usage.callsThisPeriod,
         ordersThisMonth: usage.ordersThisPeriod,
-        menuItems: usage.menuItemCount,
+        catalogItems: usage.catalogItemCount,
         teamMembers: usage.teamMemberCount,
       },
       limits: plan.limits,
@@ -623,10 +623,10 @@ export function getPlanComparisonData(): Array<{
       enterprise: formatLimit(enterprise.limits.maxOrdersPerMonth),
     },
     {
-      feature: 'Menu items',
-      starter: formatLimit(starter.limits.maxMenuItems),
-      growth: formatLimit(growth.limits.maxMenuItems),
-      enterprise: formatLimit(enterprise.limits.maxMenuItems),
+      feature: 'Catalog items',
+      starter: formatLimit(starter.limits.maxCatalogItems),
+      growth: formatLimit(growth.limits.maxCatalogItems),
+      enterprise: formatLimit(enterprise.limits.maxCatalogItems),
     },
     {
       feature: 'Team members',

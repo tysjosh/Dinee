@@ -7,6 +7,7 @@ export type { IntegrationSetupProps, RunsheetConfig } from "./IntegrationSetup";
 export { default as BusinessSetup } from "./BusinessSetup";
 export type { BusinessSetupProps } from "./BusinessSetup";
 export { default as BusinessIdDisplay } from "./VirtualNumberGenerator";
+export { default as VirtualNumberStep } from "./VirtualNumberStep";
 export { default as BranchSetup } from "./BranchSetup";
 export type { BranchData, BranchSetupProps, DayHours, OperatingHours } from "./BranchSetup";
 export { default as MenuImport } from "./MenuImport";

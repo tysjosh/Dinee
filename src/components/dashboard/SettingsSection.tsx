@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import { Restaurant } from "@/types/global";
 import { LANGUAGE_OPTIONS } from "@/lib/constants";
 import Input from "@/components/ui/Input";
@@ -7,6 +9,8 @@ import Button from "@/components/ui/Button";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useBusinessStorage } from "@/hooks/useBusinessStorage";
 import { useEnabledModules } from "@/hooks/useEnabledModules";
+import TeamInvitations from "./TeamInvitations";
+import PhoneNumberManagement from "./PhoneNumberManagement";
 
 export interface SettingsSectionProps {
   tabId: "settings";
@@ -33,6 +37,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
   const { isModuleActive } = useEnabledModules();
   const showMenuManagement = isModuleActive("restaurant_pack");
   const showRunsheetConnect = isModuleActive("runsheet_connect");
+
+  // Check if branch has a dedicated phone number (Req 11.4, 11.5)
+  const dedicatedNumber = useQuery(
+    api.phoneProvisioning.queries.getPhoneNumberByBranch,
+    restaurantId ? { branchId: restaurantId } : "skip"
+  );
+  const hasDedicatedNumber =
+    dedicatedNumber != null && dedicatedNumber.status === "assigned";
 
   // Initialize local state with current restaurant data
   useEffect(() => {
@@ -242,22 +254,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
               </p>
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-white/70 mb-2">
-              AI Agent Phone Number
-            </label>
-            <input
-              type="text"
-              value={process.env.NEXT_PUBLIC_VIRTUAL_NUMBER || "Not configured"}
-              disabled
-              className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white/60 text-sm cursor-not-allowed"
-            />
-            <p className="mt-2 text-sm text-white/50">
-              Customers call this number and provide your Business ID
-            </p>
-          </div>
         </div>
       </div>
+
+      {/* Phone Number Management — Req 10.1, 11.4, 11.5 */}
+      <PhoneNumberManagement
+        branchId={restaurantId || ""}
+        restaurantId={restaurantId || ""}
+      />
 
       {/* AI Agent Configuration Section */}
       <div className="card-minimal rounded-xl">
@@ -420,7 +424,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
         </div>
       </div>
 
-      {/* Customer Instructions */}
+      {/* Customer Instructions — conditional based on number type (Req 11.4, 11.5) */}
       <div className="bg-emerald-500/10 rounded-xl border border-emerald-500/20">
         <div className="px-4 sm:px-6 py-4">
           <h3 className="text-sm font-medium text-emerald-400 mb-3 flex items-center">
@@ -441,24 +445,39 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
           </h3>
           <div className="text-xs sm:text-sm text-emerald-300 space-y-2">
             <p className="font-medium">Tell your customers to:</p>
-            <ol className="list-decimal list-inside space-y-2 ml-2">
-              <li>
-                Call{" "}
-                <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
-                  {process.env.NEXT_PUBLIC_VIRTUAL_NUMBER || "(555) 123-4567"}
-                </span>
-              </li>
-              <li>
-                When prompted, provide Business ID:{" "}
-                <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
-                  {restaurantId}
-                </span>
-              </li>
-              <li>Place their order with the AI agent</li>
-            </ol>
+            {hasDedicatedNumber ? (
+              <ol className="list-decimal list-inside space-y-2 ml-2">
+                <li>
+                  Call your dedicated number{" "}
+                  <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
+                    {dedicatedNumber.phoneNumber}
+                  </span>
+                </li>
+                <li>Place their order directly with the AI agent</li>
+              </ol>
+            ) : (
+              <ol className="list-decimal list-inside space-y-2 ml-2">
+                <li>
+                  Call{" "}
+                  <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
+                    {process.env.NEXT_PUBLIC_VIRTUAL_NUMBER || "(555) 123-4567"}
+                  </span>
+                </li>
+                <li>
+                  When prompted, provide Business ID:{" "}
+                  <span className="font-mono font-medium bg-emerald-500/20 px-2 py-1 rounded text-emerald-400">
+                    {restaurantId}
+                  </span>
+                </li>
+                <li>Place their order with the AI agent</li>
+              </ol>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Team Invitations */}
+      <TeamInvitations />
 
       {/* Save Section */}
       <div className="card-minimal rounded-xl">

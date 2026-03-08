@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
+import { useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import BusinessTypeSelection from "@/components/onboarding/BusinessTypeSelection";
 import ModuleActivation from "@/components/onboarding/ModuleActivation";
 import IntegrationSetup, {
@@ -10,14 +12,17 @@ import IntegrationSetup, {
 } from "@/components/onboarding/IntegrationSetup";
 import BusinessSetup from "@/components/onboarding/BusinessSetup";
 import BusinessIdDisplay from "@/components/onboarding/VirtualNumberGenerator";
-import { useBusinessStorage } from "@/hooks/useBusinessStorage";
+import PlanPicker from "@/components/onboarding/PlanPicker";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { MinimalHeader } from "@/components/ui/Header";
 import type { Vertical } from "@/lib/modules/types";
+import type { BillingCycle } from "@/lib/billing/types";
 
 type OnboardingStep =
   | "business-type"
   | "business-setup"
   | "module-activation"
+  | "plan-selection"
   | "integration-setup"
   | "restaurant-id"
   | "complete";
@@ -37,19 +42,23 @@ type OnboardingStep =
  */
 export default function OnboardingPage() {
   const router = useRouter();
-  const { businessId: restaurantId } = useBusinessStorage();
+  const { user } = useCurrentUser();
+  const updateUser = useMutation(api.users.updateUser);
+  const createSubscription = useMutation(api.subscriptions.createSubscription);
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("business-type");
   const [generatedBusinessId, setGeneratedBusinessId] = useState("");
   const [selectedVertical, setSelectedVertical] = useState<Vertical | undefined>();
   const [enabledModules, setEnabledModules] = useState<string[]>(["core_platform"]);
   const [runsheetConfig, setRunsheetConfig] = useState<RunsheetConfig | undefined>();
+  const [planLoading, setPlanLoading] = useState(false);
 
+  // If the user already has a tenantId (completed onboarding), redirect to dashboard
   useEffect(() => {
-    if (restaurantId) {
+    if (user?.tenantId) {
       router.push("/client/dashboard");
     }
     window.scrollTo(0, 0);
-  }, [restaurantId, router]);
+  }, [user?.tenantId, router]);
 
   const handleVerticalSelect = (vertical: Vertical) => {
     setSelectedVertical(vertical);
@@ -66,13 +75,67 @@ export default function OnboardingPage() {
     setCurrentStep("business-setup");
   };
 
-  const handleBusinessSetup = (businessId: string) => {
+  const handleBusinessSetup = async (businessId: string) => {
     setGeneratedBusinessId(businessId);
+
+    // Link the authenticated user to the newly created restaurant
+    // by setting tenantId on the user record. This replaces localStorage
+    // as the primary identity mechanism. The TenantContext (via AppProvider)
+    // will automatically pick up the new tenantId from the user record.
+    if (user?.userId && businessId) {
+      try {
+        await updateUser({
+          userId: user.userId,
+          tenantId: businessId,
+        });
+      } catch (error) {
+        console.error("Failed to link user to restaurant:", error);
+        // Continue with onboarding — the user can retry from settings
+      }
+    }
+
     setCurrentStep("module-activation");
   };
 
   const handleModulesConfirmed = () => {
-    // Show integration setup for logistics with runsheet_connect enabled
+    setCurrentStep("plan-selection");
+  };
+
+  const handlePlanSelected = async (planId: string, billingCycle: BillingCycle) => {
+    if (!generatedBusinessId) return;
+    setPlanLoading(true);
+    try {
+      const now = Date.now();
+      const trialDays = 14;
+      const trialEndsAt = now + trialDays * 24 * 60 * 60 * 1000;
+      const subscriptionId = `SUB_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`.toUpperCase();
+
+      await createSubscription({
+        subscriptionId,
+        restaurantId: generatedBusinessId,
+        planId,
+        status: "trialing",
+        currentPeriodStart: now,
+        currentPeriodEnd: trialEndsAt,
+        paymentProvider: "paystack",
+        billingCycle,
+        trialEndsAt,
+      });
+    } catch (error) {
+      console.error("Failed to create subscription:", error);
+      // Continue — subscription can be created later from settings
+    } finally {
+      setPlanLoading(false);
+    }
+    goToPostPlanStep();
+  };
+
+  const handlePlanSkipped = async () => {
+    // Default to Starter plan with 14-day trial
+    await handlePlanSelected("starter", "monthly");
+  };
+
+  const goToPostPlanStep = () => {
     if (
       selectedVertical === "logistics" &&
       enabledModules.includes("runsheet_connect")
@@ -134,6 +197,15 @@ export default function OnboardingPage() {
               </div>
             </div>
           </div>
+        );
+
+      case "plan-selection":
+        return (
+          <PlanPicker
+            onSelectPlan={handlePlanSelected}
+            onSkip={handlePlanSkipped}
+            isLoading={planLoading}
+          />
         );
 
       case "integration-setup":

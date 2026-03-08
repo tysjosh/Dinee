@@ -14,6 +14,9 @@ export type { ModalProps } from './Modal';
 export { default as ConfirmationModal } from './ConfirmationModal';
 export type { ConfirmationModalProps } from './ConfirmationModal';
 
+export { default as LimitReachedModal } from './LimitReachedModal';
+export type { LimitReachedModalProps } from './LimitReachedModal';
+
 export { default as Badge } from './Badge';
 export type { BadgeProps } from './Badge';
 

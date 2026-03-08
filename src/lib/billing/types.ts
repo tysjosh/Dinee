@@ -22,7 +22,7 @@ import type { PaymentMethod } from '../payment/types';
  * - past_due: Payment is overdue
  * - trialing: Subscription is in trial period
  */
-export type SubscriptionStatus = 'active' | 'cancelled' | 'past_due' | 'trialing';
+export type SubscriptionStatus = 'active' | 'pending' | 'cancelled' | 'past_due' | 'trialing';
 
 /**
  * Billing cycle options
@@ -50,8 +50,8 @@ export interface PlanLimits {
   maxCallsPerMonth: number;
   /** Maximum orders per month (-1 for unlimited) */
   maxOrdersPerMonth: number;
-  /** Maximum menu items per branch (-1 for unlimited) */
-  maxMenuItems: number;
+  /** Maximum catalog items per branch (-1 for unlimited) */
+  maxCatalogItems: number;
   /** Maximum team members (-1 for unlimited) */
   maxTeamMembers: number;
 }
@@ -218,14 +218,14 @@ export interface SubscriptionPaymentResult {
  * Result of checking subscription limits
  */
 export interface SubscriptionLimitsResult {
-  /** Whether the restaurant is within limits */
+  /** Whether the business is within limits */
   withinLimits: boolean;
   /** Current usage */
   usage: {
     branches: number;
     callsThisMonth: number;
     ordersThisMonth: number;
-    menuItems: number;
+    catalogItems: number;
     teamMembers: number;
   };
   /** Plan limits */
@@ -267,7 +267,7 @@ export interface CancelSubscriptionOptions {
 }
 
 /**
- * Subscription usage data for a restaurant
+ * Subscription usage data for a business
  */
 export interface SubscriptionUsage {
   /** Restaurant ID */
@@ -282,8 +282,8 @@ export interface SubscriptionUsage {
   callsThisPeriod: number;
   /** Orders this billing period */
   ordersThisPeriod: number;
-  /** Total menu items */
-  menuItemCount: number;
+  /** Total catalog items */
+  catalogItemCount: number;
   /** Team member count */
   teamMemberCount: number;
 }

@@ -71,13 +71,15 @@ export interface BillingDashboardProps {
   className?: string;
   /** Callback when plan change is requested */
   onChangePlan?: (planId: string, billingCycle: BillingCycle) => void;
+  /** Callback when subscription cancellation is requested */
+  onCancelSubscription?: () => void;
 }
 
 interface UsageData {
   branchCount: number;
   callsThisPeriod: number;
   ordersThisPeriod: number;
-  menuItemCount: number;
+  catalogItemCount: number;
   teamMemberCount: number;
 }
 
@@ -227,11 +229,13 @@ function CurrentPlanCard({
   plan,
   onUpgrade,
   onDowngrade,
+  onCancel,
 }: {
   subscription: Subscription;
   plan: SubscriptionPlan;
   onUpgrade: () => void;
   onDowngrade: () => void;
+  onCancel?: () => void;
 }) {
   const daysUntilRenewal = Math.ceil(
     (subscription.currentPeriodEnd - Date.now()) / (24 * 60 * 60 * 1000)
@@ -239,6 +243,7 @@ function CurrentPlanCard({
 
   const statusBadge = {
     active: { variant: 'success' as const, label: 'Active' },
+    pending: { variant: 'warning' as const, label: 'Pending Payment' },
     trialing: { variant: 'info' as const, label: 'Trial' },
     past_due: { variant: 'error' as const, label: 'Past Due' },
     cancelled: { variant: 'neutral' as const, label: 'Cancelled' },
@@ -308,6 +313,17 @@ function CurrentPlanCard({
           <Zap size={14} className="mr-1" />
           Upgrade
         </Button>
+        {onCancel && subscription.status !== 'cancelled' && (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={onCancel}
+            className="btn btn-destructive btn-sm ml-auto"
+            disabled={subscription.cancelAtPeriodEnd === true}
+          >
+            {subscription.cancelAtPeriodEnd ? 'Cancellation Scheduled' : 'Cancel'}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -384,7 +400,7 @@ function UsageSection({
     maxBranches: number;
     maxCallsPerMonth: number;
     maxOrdersPerMonth: number;
-    maxMenuItems: number;
+    maxCatalogItems: number;
     maxTeamMembers: number;
   };
 }) {
@@ -411,10 +427,10 @@ function UsageSection({
           limit={limits.maxOrdersPerMonth}
         />
         <UsageProgressBar
-          label="Menu Items"
+          label="Catalog Items"
           icon={UtensilsCrossed}
-          used={usage.menuItemCount}
-          limit={limits.maxMenuItems}
+          used={usage.catalogItemCount}
+          limit={limits.maxCatalogItems}
         />
         <UsageProgressBar
           label="Team Members"
@@ -620,9 +636,9 @@ function PlanComparisonCard({
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-white/60">Menu items</span>
+          <span className="text-white/60">Catalog items</span>
           <span className="text-white font-medium">
-            {isUnlimited(plan.limits.maxMenuItems) ? 'Unlimited' : plan.limits.maxMenuItems}
+            {isUnlimited(plan.limits.maxCatalogItems) ? 'Unlimited' : plan.limits.maxCatalogItems}
           </span>
         </div>
         <div className="flex items-center justify-between text-sm">
@@ -748,7 +764,7 @@ function NoSubscriptionState({ onSelectPlan }: { onSelectPlan: () => void }) {
       <CreditCard className="h-16 w-16 text-white/20 mx-auto mb-4" />
       <h3 className="text-xl font-semibold text-white mb-2">No Active Subscription</h3>
       <p className="text-white/60 text-sm mb-6 max-w-md mx-auto">
-        Choose a subscription plan to unlock all features and start managing your restaurant calls with AI.
+        Choose a subscription plan to unlock all features and start managing your business with AI.
       </p>
       <Button onClick={onSelectPlan} className="btn btn-primary btn-lg">
         <Zap size={18} className="mr-2" />
@@ -767,7 +783,7 @@ function NoSubscriptionState({ onSelectPlan }: { onSelectPlan: () => void }) {
  * BillingDashboard - Main billing dashboard component
  * 
  * Displays subscription information, usage metrics, billing history,
- * and plan comparison for restaurant owners.
+ * and plan comparison for business owners.
  * 
  * @see Requirements: 26.5 - Display current plan, usage, billing history
  * @see Requirements: 26.6 - Send billing reminders before subscription renewal
@@ -776,6 +792,7 @@ export function BillingDashboard({
   restaurantId,
   className,
   onChangePlan,
+  onCancelSubscription,
 }: BillingDashboardProps) {
   // State
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
@@ -846,8 +863,9 @@ export function BillingDashboard({
     );
   }
 
-  // No subscription state
-  if (!subscription || !plan) {
+  // No subscription or pending payment — show plan selection
+  const isActiveSubscription = subscription && plan && subscription.status !== "pending";
+  if (!isActiveSubscription) {
     return (
       <div className={cn("space-y-6", className)}>
         {/* Header */}
@@ -874,7 +892,7 @@ export function BillingDashboard({
     branchCount: 0,
     callsThisPeriod: 0,
     ordersThisPeriod: 0,
-    menuItemCount: 0,
+    catalogItemCount: 0,
     teamMemberCount: 0,
   };
 
@@ -907,6 +925,7 @@ export function BillingDashboard({
           plan={plan}
           onUpgrade={handleUpgrade}
           onDowngrade={handleDowngrade}
+          onCancel={onCancelSubscription}
         />
         <UsageSection
           usage={usageData}

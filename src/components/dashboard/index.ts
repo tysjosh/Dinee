@@ -70,3 +70,5 @@ export type { FraudReviewDashboardProps } from './FraudReviewDashboard';
 
 export { default as RoutingAnalytics } from './RoutingAnalytics';
 export type { RoutingAnalyticsProps, RoutingDecisionData, OrderWithRouting, RoutingReason } from './RoutingAnalytics';
+
+export { default as PhoneNumberManagement } from './PhoneNumberManagement';
