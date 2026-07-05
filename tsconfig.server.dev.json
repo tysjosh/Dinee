@@ -1,0 +1,14 @@
+{
+  // Dev-run config for the standalone ws-server. Extends the build config and
+  // adds the `@/*` path mapping so `tsconfig-paths` can resolve alias imports at
+  // runtime. Used with ts-node in transpile-only mode (see nodemon.json and the
+  // `server:start[:dev]` scripts), which also allows the source's explicit `.ts`
+  // import extensions without emitting.
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}

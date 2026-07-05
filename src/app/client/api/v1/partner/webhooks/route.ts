@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../../../../convex/_generated/api';
+import type { Doc } from '../../../../../../../convex/_generated/dataModel';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
@@ -119,7 +120,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     );
     
     // Map to response format (exclude secret)
-    const responseData: WebhookSubscriptionResponse[] = subscriptions.map(sub => ({
+    const responseData: WebhookSubscriptionResponse[] = subscriptions.map((sub: Doc<"webhookSubscriptions">) => ({
       id: sub.subscriptionId,
       url: sub.url,
       events: sub.events,

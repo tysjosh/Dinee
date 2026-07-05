@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
+import type { Doc } from "../../../convex/_generated/dataModel";
 import { useTenant } from "@/contexts/TenantContext";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
@@ -263,7 +264,7 @@ const TeamInvitations: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {invitations.map((inv) => {
+                    {invitations.map((inv: Doc<"invitations">) => {
                       const isPending =
                         inv.status === "pending" && inv.expiresAt >= Date.now();
                       const isActionLoading = actionLoading === inv.inviteToken;

@@ -633,7 +633,7 @@ export function FraudReviewDashboard({
   const filteredFlagged = useMemo(() => {
     if (!flaggedNumbers) return [];
     
-    return flaggedNumbers.filter((item) => {
+    return flaggedNumbers.filter((item: FlaggedNumber) => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -644,7 +644,7 @@ export function FraudReviewDashboard({
       
       // Signal type filter
       if (filterSignalType !== 'all') {
-        if (!item.signals.some(s => s.signalType === filterSignalType)) {
+        if (!item.signals.some((s: FlaggedNumber["signals"][number]) => s.signalType === filterSignalType)) {
           return false;
         }
       }
@@ -657,7 +657,7 @@ export function FraudReviewDashboard({
   const filteredBlocked = useMemo(() => {
     if (!blockedNumbers) return [];
     
-    return blockedNumbers.filter((item) => {
+    return blockedNumbers.filter((item: BlockedNumber) => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -940,7 +940,7 @@ export function FraudReviewDashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredFlagged.map((item) => (
+                  {filteredFlagged.map((item: FlaggedNumber) => (
                     <FlaggedNumberRow
                       key={item.phoneNumber}
                       item={item as FlaggedNumber}
@@ -995,7 +995,7 @@ export function FraudReviewDashboard({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBlocked.map((item) => (
+                  {filteredBlocked.map((item: BlockedNumber) => (
                     <BlockedNumberRow
                       key={item.phoneNumber}
                       item={item as BlockedNumber}

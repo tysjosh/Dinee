@@ -266,10 +266,10 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
   // Convert Convex orders to our Order type
   useEffect(() => {
     if (convexActiveOrders && convexPastOrders && convexCalls) {
-      const activeOrders: Order[] = convexActiveOrders.map((order) =>
+      const activeOrders: Order[] = convexActiveOrders.map((order: Doc<"orders">) =>
         convertOrder(order, convexCalls)
       );
-      const pastOrders: Order[] = convexPastOrders.map((order) =>
+      const pastOrders: Order[] = convexPastOrders.map((order: Doc<"orders">) =>
         convertOrder(order, convexCalls)
       );
       const allOrders = [...activeOrders, ...pastOrders];
@@ -289,10 +289,10 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
       convexCalls !== undefined
     ) {
       // All queries have returned, even if some are empty
-      const activeOrders: Order[] = (convexActiveOrders || []).map((order) =>
+      const activeOrders: Order[] = (convexActiveOrders || []).map((order: Doc<"orders">) =>
         convertOrder(order, convexCalls || [])
       );
-      const pastOrders: Order[] = (convexPastOrders || []).map((order) =>
+      const pastOrders: Order[] = (convexPastOrders || []).map((order: Doc<"orders">) =>
         convertOrder(order, convexCalls || [])
       );
       const allOrders = [...activeOrders, ...pastOrders];
@@ -323,7 +323,7 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
 
         // Find the Convex order ID from active orders (since we're cancelling an active order)
         const convexOrder = convexActiveOrders?.find(
-          (order) => order.orderId === orderId
+          (order: Doc<"orders">) => order.orderId === orderId
         );
         if (convexOrder) {
           await cancelOrderMutation({
@@ -348,7 +348,7 @@ export function OrdersProvider({ children }: OrdersProviderProps) {
 
         // Find the Convex order ID from active orders (since we're completing an active order)
         const convexOrder = convexActiveOrders?.find(
-          (order) => order.orderId === orderId
+          (order: Doc<"orders">) => order.orderId === orderId
         );
         if (convexOrder) {
           await completeOrderMutation({

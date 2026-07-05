@@ -36,17 +36,59 @@ export function getEncryptionKey(): Buffer {
   return buf;
 }
 
+const HKDF_DIGEST = "sha256";
+const HKDF_INFO = "integration-credential-key";
+
+/**
+ * Derives the AES-256 key to use for a given optional per-platform key salt.
+ *
+ * When `keySalt` is absent (or an empty string), the shared
+ * `INTEGRATION_ENCRYPTION_KEY` is returned unchanged. This keeps behavior
+ * byte-for-byte identical for existing callers and previously-stored
+ * (migrated Runsheet) ciphertext. (Req 2.7, 10.3)
+ *
+ * When `keySalt` is provided, the shared key is combined with the salt via
+ * HKDF (SHA-256) to produce a distinct 32-byte key. Because a different salt
+ * yields a different key, ciphertext produced with one platform's salt cannot
+ * be decrypted with another platform's salt or with no salt. (Req 12.2)
+ *
+ * @param keySalt - Optional per-platform key salt from the Transport_Contract
+ * @returns A 32-byte Buffer suitable for AES-256-GCM
+ */
+function deriveKey(keySalt?: string): Buffer {
+  const baseKey = getEncryptionKey();
+
+  if (keySalt === undefined || keySalt.length === 0) {
+    return baseKey;
+  }
+
+  const derived = crypto.hkdfSync(
+    HKDF_DIGEST,
+    baseKey,
+    Buffer.from(keySalt, "utf-8"),
+    Buffer.from(HKDF_INFO, "utf-8"),
+    32
+  );
+  return Buffer.from(derived);
+}
+
 /**
  * Encrypts a plaintext string using AES-256-GCM.
  *
  * The output is a base64 string containing: IV (12 bytes) + auth tag (16 bytes) + ciphertext.
  * A random IV is generated per call to ensure unique ciphertexts. (Req 18.1)
  *
+ * When an optional per-platform `keySalt` is supplied, the encryption key is
+ * derived from the shared key and that salt so the resulting ciphertext can
+ * only be decrypted with the same salt. When omitted, the shared key is used
+ * unchanged and behavior is identical to before. (Req 2.2, 12.2)
+ *
  * @param plaintext - The secret value to encrypt (e.g., an API key)
+ * @param keySalt - Optional per-platform key salt (from the Transport_Contract)
  * @returns A base64-encoded string containing IV + auth tag + ciphertext
  */
-export function encrypt(plaintext: string): string {
-  const key = getEncryptionKey();
+export function encrypt(plaintext: string, keySalt?: string): string {
+  const key = deriveKey(keySalt);
   const iv = crypto.randomBytes(IV_LENGTH);
 
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
@@ -72,12 +114,18 @@ export function encrypt(plaintext: string): string {
  * the remaining ciphertext. Decryption should only happen at the moment of
  * an outbound API call — never cache the result. (Req 18.1)
  *
+ * When an optional per-platform `keySalt` is supplied, it MUST match the salt
+ * used at encryption time; otherwise the derived key differs and GCM
+ * authentication fails. When omitted, the shared key is used unchanged so
+ * previously-stored (migrated Runsheet) ciphertext still decrypts. (Req 10.3, 12.2)
+ *
  * @param encryptedBase64 - The base64 string from `encrypt`
+ * @param keySalt - Optional per-platform key salt (from the Transport_Contract)
  * @returns The original plaintext
- * @throws Error if decryption fails (wrong key, tampered data, etc.)
+ * @throws Error if decryption fails (wrong key, wrong salt, tampered data, etc.)
  */
-export function decrypt(encryptedBase64: string): string {
-  const key = getEncryptionKey();
+export function decrypt(encryptedBase64: string, keySalt?: string): string {
+  const key = deriveKey(keySalt);
   const combined = Buffer.from(encryptedBase64, "base64");
 
   if (combined.length < IV_LENGTH + AUTH_TAG_LENGTH) {

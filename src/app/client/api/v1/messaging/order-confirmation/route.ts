@@ -85,7 +85,7 @@ async function fetchOrder(
       callId: orderDoc.callId,
       phoneNumber: orderDoc.customerPhone || "",
       customerName: orderDoc.customerName,
-      items: orderDoc.items.map((item, index) => ({
+      items: orderDoc.items.map((item: { name: string; quantity: number; price: number }, index: number) => ({
         id: `item-${index}`,
         name: item.name,
         quantity: item.quantity,

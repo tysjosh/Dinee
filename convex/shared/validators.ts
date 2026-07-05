@@ -103,7 +103,12 @@ export const conversationTypeValidator = v.union(
   v.literal("legal_inquiry"),
   // Hospitality types
   v.literal("hospitality_reservation"),
-  v.literal("hospitality_inquiry")
+  v.literal("hospitality_inquiry"),
+  // Runsheet (fuel logistics voice) conversation types (dinee-voice-platform Req 4.1)
+  v.literal("runsheet_fuel_order_intake"),
+  v.literal("runsheet_order_status"),
+  v.literal("runsheet_driver_exception"),
+  v.literal("runsheet_dispatch_callback")
 );
 
 // Proof of delivery

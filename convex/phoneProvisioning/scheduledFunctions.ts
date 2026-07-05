@@ -80,7 +80,9 @@ const REGION_COUNTRY_CODES: Record<ProvisioningRegion, string> = {
 
 export const processQuarantineExpirations = internalAction({
   args: {},
-  handler: async (ctx) => {
+  handler: async (
+    ctx,
+  ): Promise<{ processed: number; retained: number; released: number }> => {
     logger.info("Processing quarantine expirations", {
       action: "quarantine_expiry",
     });
@@ -360,7 +362,14 @@ function getRegionPrimaryProvider(
 
 export const runHealthChecks = internalAction({
   args: {},
-  handler: async (ctx) => {
+  handler: async (
+    ctx,
+  ): Promise<{
+    checked: number;
+    healthy: number;
+    degraded: number;
+    unreachable: number;
+  }> => {
     logger.info("Running health checks on assigned numbers", {
       action: "health_check",
     });

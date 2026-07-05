@@ -1,16 +1,21 @@
 /**
- * Preservation Test — Voice Call Flow Structure
+ * Preservation Test — Voice Call Flow Structure (post pack-extraction)
  *
  * Validates: Requirements 3.7
  *
- * This test establishes the baseline behavior of the ws-server voice call flow
- * that MUST be preserved after fixes are applied. It uses static analysis to verify:
- *   1. tools.ts exports all expected wrapper functions
- *   2. index.ts handles WebSocket connections and tool calls via switch statements
- *   3. The tool dispatch includes all expected tools for each route
- *   4. generateOrderId exists in tools.ts
- *
- * EXPECTED OUTCOME: All tests PASS on unfixed code (confirms baseline).
+ * This test establishes the baseline behavior of the voice call flow that MUST
+ * be preserved. The dinee-voice-platform refactor (task 4.8) extracted the
+ * ws-server voice logic into VoiceDomainPacks and removed the legacy
+ * `src/app/ws-server/tools.ts` / `call-phase.ts` modules and the inline
+ * per-vertical branching in `index.ts`. This test was updated to pin the SAME
+ * capabilities in their new home:
+ *   1. The restaurant wrapper functions are exported from the restaurant pack
+ *      wrappers module (still authenticated — see the C3 auth test).
+ *   2. The restaurant pack declares the tool definitions the agent dispatches.
+ *   3. index.ts still registers the WebSocket routes and handles tool calls.
+ *   4. The callback route still dispatches its restaurant tool subset.
+ *   5. index.ts imports the wrappers from the restaurant pack.
+ *   6. generateOrderId still exists as a synchronous function.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -18,10 +23,10 @@ import * as path from 'path';
 import fc from 'fast-check';
 
 // ============================================================================
-// Observed Baseline — ws-server tool exports and dispatch
+// Observed Baseline — restaurant pack wrappers, tool definitions, and dispatch
 // ============================================================================
 
-/** Wrapper functions that must be exported from tools.ts */
+/** Wrapper functions that must be exported from the restaurant pack wrappers. */
 const EXPECTED_WRAPPER_EXPORTS = [
   'wrapperGetRestaurantDetails',
   'wrapperUpsertCallData',
@@ -32,9 +37,8 @@ const EXPECTED_WRAPPER_EXPORTS = [
   'wrapperCheckBlocked',
 ] as const;
 
-/** Non-wrapper utility functions that must be exported from tools.ts */
-const EXPECTED_UTILITY_EXPORTS = [
-  'generateOrderId',
+/** Non-wrapper utility functions that must be exported from the wrappers module. */
+const EXPECTED_WRAPPER_UTILITY_EXPORTS = [
   'extractItemCategories',
   'calculateOrderTotal',
   'generateBlockedCallTwiML',
@@ -42,10 +46,11 @@ const EXPECTED_UTILITY_EXPORTS = [
 ] as const;
 
 /**
- * Tools dispatched in the main /media-stream switch statement.
- * These are the tool names the OpenAI Realtime API calls during a normal call.
+ * Tool definitions the restaurant pack must declare — the tool names the OpenAI
+ * Realtime API calls during a normal restaurant call (formerly the main
+ * /media-stream switch dispatch).
  */
-const MAIN_STREAM_DISPATCHED_TOOLS = [
+const RESTAURANT_PACK_TOOLS = [
   'get_restaurant_details',
   'add_transcript_dialogue',
   'upsert_order',
@@ -54,7 +59,8 @@ const MAIN_STREAM_DISPATCHED_TOOLS = [
 ] as const;
 
 /**
- * Tools dispatched in the /media-stream-callback switch statement.
+ * Tools dispatched in the /media-stream-callback switch statement (still an
+ * inline switch on the callback route).
  */
 const CALLBACK_STREAM_DISPATCHED_TOOLS = [
   'get_restaurant_details',
@@ -62,15 +68,12 @@ const CALLBACK_STREAM_DISPATCHED_TOOLS = [
   'generate_order_id',
 ] as const;
 
-/**
- * Functions imported from tools.ts into index.ts.
- */
-const EXPECTED_INDEX_IMPORTS = [
+/** Functions imported from the restaurant pack wrappers into index.ts. */
+const EXPECTED_INDEX_WRAPPER_IMPORTS = [
   'wrapperGetRestaurantDetails',
   'wrapperUpsertCallData',
   'wrapperAddTranscriptDialogues',
   'wrapperUpsertOrders',
-  'generateOrderId',
   'wrapperCheckBlocked',
   'generateBlockedCallTwiML',
 ] as const;
@@ -105,25 +108,34 @@ function extractSwitchCaseNames(source: string): string[] {
   return names;
 }
 
-function extractImportsFrom(source: string, modulePattern: string): string[] {
+/** Extract the tool names declared in a VoiceDomainPack tool-definition module. */
+function extractToolDefinitionNames(source: string): string[] {
+  const names: string[] = [];
+  const nameRegex = /name:\s*["']([^"']+)["']/g;
+  let match: RegExpExecArray | null;
+  while ((match = nameRegex.exec(source)) !== null) {
+    names.push(match[1]);
+  }
+  return names;
+}
+
+function extractImportedNames(source: string, modulePattern: string): string[] {
   const importRegex = new RegExp(
-    `import\\s*\\{([^}]+)\\}\\s*from\\s*["']${modulePattern}["']`,
+    `import\\s*\\{([^}]+)\\}\\s*from\\s*["'][^"']*${modulePattern}[^"']*["']`,
     'g'
   );
   const names: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = importRegex.exec(source)) !== null) {
-    const imports = match[1].split(',').map(s => s.trim()).filter(Boolean);
+    const imports = match[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     names.push(...imports);
   }
   return names;
 }
 
-/**
- * Extract the tool dispatch switch block from a specific WebSocket route handler.
- * Looks for `switch (res.name)` or `switch (toolName)` blocks within the source.
- * The state machine refactor extracts `const toolName = res.name` before the switch.
- */
 function extractToolSwitchBlocks(source: string): string[] {
   const blocks: string[] = [];
   const switchPattern = /switch\s*\(\s*(?:res\.name|toolName)\s*\)\s*\{/g;
@@ -151,14 +163,8 @@ function extractToolSwitchBlocks(source: string): string[] {
   return blocks;
 }
 
-/**
- * Find the switch block(s) that contain a specific tool case.
- * This is needed because the logistics vertical added additional switch blocks
- * to the same handler — the restaurant blocks are still present but may not be
- * at the same positional index.
- */
 function findSwitchBlocksContaining(blocks: string[], toolName: string): string[] {
-  return blocks.filter(block => {
+  return blocks.filter((block) => {
     const cases = extractSwitchCaseNames(block);
     return cases.includes(toolName);
   });
@@ -177,38 +183,48 @@ function hasFunctionCallArgumentsHandler(source: string): boolean {
 // Tests
 // ============================================================================
 
-const TOOLS_FILE = 'src/app/ws-server/tools.ts';
+const WRAPPERS_FILE = 'src/lib/modules/packs/restaurant/wrappers.ts';
+const HANDLERS_FILE = 'src/lib/modules/packs/restaurant/handlers.ts';
+const TOOL_DEFS_FILE = 'src/lib/modules/packs/restaurant/tools.ts';
 const INDEX_FILE = 'src/app/ws-server/index.ts';
 
-describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => {
-  // ---- 1. tools.ts exports all expected wrapper functions ----
-  describe('1. tools.ts exports all expected wrapper functions', () => {
-    const toolsSource = readSourceFile(TOOLS_FILE);
-    const exportedFunctions = extractExportedFunctions(toolsSource);
+describe('Voice Call Flow Preservation — pack-extracted structure baseline', () => {
+  // ---- 1. restaurant wrappers module exports all expected wrapper functions ----
+  describe('1. restaurant wrappers module exports all expected wrapper functions', () => {
+    const source = readSourceFile(WRAPPERS_FILE);
+    const exportedFunctions = extractExportedFunctions(source);
 
     for (const wrapperName of EXPECTED_WRAPPER_EXPORTS) {
       it(`exports ${wrapperName}`, () => {
         expect(
           exportedFunctions,
-          `Missing export: ${wrapperName} in ${TOOLS_FILE}`
+          `Missing export: ${wrapperName} in ${WRAPPERS_FILE}`
         ).toContain(wrapperName);
       });
     }
   });
 
-  // ---- 2. tools.ts exports utility functions ----
-  describe('2. tools.ts exports utility functions', () => {
-    const toolsSource = readSourceFile(TOOLS_FILE);
-    const exportedFunctions = extractExportedFunctions(toolsSource);
+  // ---- 2. wrappers + handlers export utility functions ----
+  describe('2. restaurant pack exports utility functions', () => {
+    const wrappersSource = readSourceFile(WRAPPERS_FILE);
+    const handlersSource = readSourceFile(HANDLERS_FILE);
+    const wrapperFns = extractExportedFunctions(wrappersSource);
+    const handlerFns = extractExportedFunctions(handlersSource);
 
-    for (const utilName of EXPECTED_UTILITY_EXPORTS) {
-      it(`exports ${utilName}`, () => {
+    for (const utilName of EXPECTED_WRAPPER_UTILITY_EXPORTS) {
+      it(`exports ${utilName} from wrappers`, () => {
         expect(
-          exportedFunctions,
-          `Missing export: ${utilName} in ${TOOLS_FILE}`
+          wrapperFns,
+          `Missing export: ${utilName} in ${WRAPPERS_FILE}`
         ).toContain(utilName);
       });
     }
+
+    it('exports generateOrderId from handlers', () => {
+      expect(handlerFns, `Missing export: generateOrderId in ${HANDLERS_FILE}`).toContain(
+        'generateOrderId'
+      );
+    });
   });
 
   // ---- 3. index.ts has WebSocket routes ----
@@ -228,32 +244,19 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     });
   });
 
-  // ---- 4. Main stream tool dispatch includes all expected tools ----
-  describe('4. Main /media-stream tool dispatch covers expected tools', () => {
-    const indexSource = readSourceFile(INDEX_FILE);
-    const switchBlocks = extractToolSwitchBlocks(indexSource);
+  // ---- 4. Restaurant pack declares all expected tool definitions ----
+  describe('4. restaurant pack declares all expected tool definitions', () => {
+    const toolDefsSource = readSourceFile(TOOL_DEFS_FILE);
+    const declaredTools = extractToolDefinitionNames(toolDefsSource);
 
-    it('has at least two switch(res.name) blocks (main + callback)', () => {
-      expect(switchBlocks.length).toBeGreaterThanOrEqual(2);
-    });
-
-    // Find the switch block that contains restaurant tools (get_restaurant_details)
-    // The logistics vertical may have added additional switch blocks before it
-    it('main stream switch block dispatches all expected tools', () => {
-      expect(switchBlocks.length).toBeGreaterThan(0);
-      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
-      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
-      // The first restaurant block is the main /media-stream handler
-      const mainBlock = restaurantBlocks[0];
-      const dispatchedTools = extractSwitchCaseNames(mainBlock);
-
-      for (const tool of MAIN_STREAM_DISPATCHED_TOOLS) {
+    for (const tool of RESTAURANT_PACK_TOOLS) {
+      it(`declares tool ${tool}`, () => {
         expect(
-          dispatchedTools,
-          `Main stream missing tool dispatch: ${tool}`
+          declaredTools,
+          `Restaurant pack missing tool definition: ${tool}`
         ).toContain(tool);
-      }
-    });
+      });
+    }
   });
 
   // ---- 5. Callback stream tool dispatch includes expected tools ----
@@ -262,11 +265,9 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     const switchBlocks = extractToolSwitchBlocks(indexSource);
 
     it('callback stream switch block dispatches expected tools', () => {
-      expect(switchBlocks.length).toBeGreaterThanOrEqual(2);
       const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
-      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(2);
-      // The second restaurant block is the callback /media-stream-callback handler
-      const callbackBlock = restaurantBlocks[1];
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
+      const callbackBlock = restaurantBlocks[restaurantBlocks.length - 1];
       const dispatchedTools = extractSwitchCaseNames(callbackBlock);
 
       for (const tool of CALLBACK_STREAM_DISPATCHED_TOOLS) {
@@ -278,15 +279,15 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     });
   });
 
-  // ---- 6. index.ts imports expected functions from tools.ts ----
-  describe('6. index.ts imports expected functions from tools.ts', () => {
+  // ---- 6. index.ts imports wrappers from the restaurant pack ----
+  describe('6. index.ts imports wrappers from the restaurant pack', () => {
     const indexSource = readSourceFile(INDEX_FILE);
-    const toolImports = extractImportsFrom(indexSource, '\\./tools\\.ts');
+    const wrapperImports = extractImportedNames(indexSource, 'packs/restaurant/wrappers');
 
-    for (const importName of EXPECTED_INDEX_IMPORTS) {
-      it(`imports ${importName} from tools.ts`, () => {
+    for (const importName of EXPECTED_INDEX_WRAPPER_IMPORTS) {
+      it(`imports ${importName} from the restaurant pack wrappers`, () => {
         expect(
-          toolImports,
+          wrapperImports,
           `Missing import: ${importName} in ${INDEX_FILE}`
         ).toContain(importName);
       });
@@ -295,15 +296,14 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
 
   // ---- 7. generateOrderId exists and is a non-async function ----
   describe('7. generateOrderId function structure', () => {
-    const toolsSource = readSourceFile(TOOLS_FILE);
+    const handlersSource = readSourceFile(HANDLERS_FILE);
 
     it('generateOrderId is exported as a synchronous function', () => {
-      // Should match "export function generateOrderId" (no async)
-      expect(toolsSource).toMatch(/export\s+function\s+generateOrderId\s*\(/);
+      expect(handlersSource).toMatch(/export\s+function\s+generateOrderId\s*\(/);
     });
 
     it('generateOrderId returns a string', () => {
-      expect(toolsSource).toMatch(/function\s+generateOrderId\s*\(\s*\)\s*:\s*string/);
+      expect(handlersSource).toMatch(/function\s+generateOrderId\s*\(\s*\)\s*:\s*string/);
     });
   });
 
@@ -329,18 +329,18 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
     /**
      * **Validates: Requirements 3.7**
      *
-     * Property: For all expected wrapper functions in tools.ts and all expected
-     * tool dispatch entries in index.ts, the following invariants hold:
-     *   - Every wrapper function is exported from tools.ts
-     *   - Every main-stream tool has a case in the first switch(res.name) block
-     *   - Every callback-stream tool has a case in the second switch(res.name) block
-     *   - Every expected import is present in index.ts
-     *   - generateOrderId exists as a synchronous exported function
+     * Property: the extracted voice-call-flow building blocks are all present:
+     *   - Every wrapper function is exported from the restaurant wrappers module
+     *   - Every expected restaurant tool is declared in the pack tool definitions
+     *   - Every callback-stream tool has a case in the callback switch block
+     *   - Every expected wrapper import is present in index.ts
      */
-    const toolsSource = readSourceFile(TOOLS_FILE);
+    const wrappersSource = readSourceFile(WRAPPERS_FILE);
+    const toolDefsSource = readSourceFile(TOOL_DEFS_FILE);
     const indexSource = readSourceFile(INDEX_FILE);
-    const exportedFunctions = extractExportedFunctions(toolsSource);
-    const toolImports = extractImportsFrom(indexSource, '\\./tools\\.ts');
+    const exportedFunctions = extractExportedFunctions(wrappersSource);
+    const declaredTools = extractToolDefinitionNames(toolDefsSource);
+    const wrapperImports = extractImportedNames(indexSource, 'packs/restaurant/wrappers');
     const switchBlocks = extractToolSwitchBlocks(indexSource);
 
     it('all wrapper exports are present for any sampled wrapper', () => {
@@ -354,24 +354,21 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
       );
     });
 
-    it('all main-stream tools are dispatched for any sampled tool', () => {
-      const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
-      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
-      const mainDispatch = extractSwitchCaseNames(restaurantBlocks[0]);
-      const toolArb = fc.constantFrom(...MAIN_STREAM_DISPATCHED_TOOLS);
+    it('all expected restaurant tools are declared for any sampled tool', () => {
+      const toolArb = fc.constantFrom(...RESTAURANT_PACK_TOOLS);
 
       fc.assert(
         fc.property(toolArb, (toolName) => {
-          expect(mainDispatch).toContain(toolName);
+          expect(declaredTools).toContain(toolName);
         }),
-        { numRuns: MAIN_STREAM_DISPATCHED_TOOLS.length * 3 }
+        { numRuns: RESTAURANT_PACK_TOOLS.length * 3 }
       );
     });
 
     it('all callback-stream tools are dispatched for any sampled tool', () => {
       const restaurantBlocks = findSwitchBlocksContaining(switchBlocks, 'get_restaurant_details');
-      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(2);
-      const callbackDispatch = extractSwitchCaseNames(restaurantBlocks[1]);
+      expect(restaurantBlocks.length).toBeGreaterThanOrEqual(1);
+      const callbackDispatch = extractSwitchCaseNames(restaurantBlocks[restaurantBlocks.length - 1]);
       const toolArb = fc.constantFrom(...CALLBACK_STREAM_DISPATCHED_TOOLS);
 
       fc.assert(
@@ -382,14 +379,14 @@ describe('Voice Call Flow Preservation — ws-server Structure Baseline', () => 
       );
     });
 
-    it('all expected imports are present for any sampled import', () => {
-      const importArb = fc.constantFrom(...EXPECTED_INDEX_IMPORTS);
+    it('all expected wrapper imports are present for any sampled import', () => {
+      const importArb = fc.constantFrom(...EXPECTED_INDEX_WRAPPER_IMPORTS);
 
       fc.assert(
         fc.property(importArb, (importName) => {
-          expect(toolImports).toContain(importName);
+          expect(wrapperImports).toContain(importName);
         }),
-        { numRuns: EXPECTED_INDEX_IMPORTS.length * 3 }
+        { numRuns: EXPECTED_INDEX_WRAPPER_IMPORTS.length * 3 }
       );
     });
   });

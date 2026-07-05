@@ -542,11 +542,11 @@ export function createPaystackProvider(callbackUrl?: string): PaystackProvider {
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   const publicKey = process.env.PAYSTACK_PUBLIC_KEY;
 
-  const missingVars: string[] = [];
-  if (!secretKey) missingVars.push("PAYSTACK_SECRET_KEY");
-  if (!publicKey) missingVars.push("PAYSTACK_PUBLIC_KEY");
+  if (!secretKey || !publicKey) {
+    const missingVars: string[] = [];
+    if (!secretKey) missingVars.push("PAYSTACK_SECRET_KEY");
+    if (!publicKey) missingVars.push("PAYSTACK_PUBLIC_KEY");
 
-  if (missingVars.length > 0) {
     throw new Error(
       `Missing required Paystack environment variable(s): ${missingVars.join(", ")}. ` +
       "Add them to your .env.local file. " +

@@ -130,7 +130,10 @@ describe('C2: Fail-Open Internal Auth — Exploration Test', () => {
 
 describe('C3: Missing x-api-key Header in ws-server Wrappers — Exploration Test', () => {
   it('should verify all ws-server wrapper functions include x-api-key header in fetch calls', () => {
-    const toolsPath = resolve(process.cwd(), 'src/app/ws-server/tools.ts');
+    // The ws-server wrappers were extracted into the restaurant VoiceDomainPack
+    // (dinee-voice-platform task 4.8); the legacy `src/app/ws-server/tools.ts`
+    // module was removed. The authenticated-fetch wrappers now live here.
+    const toolsPath = resolve(process.cwd(), 'src/lib/modules/packs/restaurant/wrappers.ts');
     const source = readFileSync(toolsPath, 'utf-8');
 
     // These are the wrapper functions that make fetch calls to internal API routes.

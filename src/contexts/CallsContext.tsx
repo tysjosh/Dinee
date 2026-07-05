@@ -185,7 +185,7 @@ export function CallsProvider({ children }: CallsProviderProps) {
   // Convert Convex calls to our Call type
   useEffect(() => {
     if (convexCalls) {
-      const calls: Call[] = convexCalls.map((call) => ({
+      const calls: Call[] = convexCalls.map((call: Doc<"calls">) => ({
         ...call,
         phoneNumber: call.phoneNumber,
         status: call.status,

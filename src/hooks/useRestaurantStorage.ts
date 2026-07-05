@@ -193,7 +193,7 @@ export function useRestaurantStorage() {
     id: restaurantData.restaurantId,
     name: restaurantData.name,
     agentName: restaurantData.agentName,
-    menuDetails: menuItems.map(item => ({
+    menuDetails: menuItems.map((item: { name: string; price: string; description?: string }) => ({
       name: item.name,
       price: item.price,
       description: item.description,

@@ -12,6 +12,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
+import type { Doc } from "../../../convex/_generated/dataModel";
 import { createLogger } from "../logger";
 import { dispatchEvent } from "../partner-api/webhook-service";
 import type { WebhookEventType, WebhookSubscription } from "../partner-api/types";
@@ -109,7 +110,7 @@ export async function dispatchLogisticsWebhookEvent(
 
     if (rawSubscriptions.length > 0) {
       // Map Convex subscription records to the WebhookSubscription interface
-      const subscriptions: WebhookSubscription[] = rawSubscriptions.map((s) => ({
+      const subscriptions: WebhookSubscription[] = rawSubscriptions.map((s: Doc<"webhookSubscriptions">) => ({
         id: s.subscriptionId,
         partnerId: s.partnerId,
         url: s.url,

@@ -200,7 +200,7 @@ export async function POST(
     });
 
     // Build response
-    const locations = result.branches.map((b, i) => ({
+    const locations = result.branches.map((b: { branchId: string }, i: number) => ({
       locationId: b.branchId,
       name: body.locations?.[i]?.name ?? b.branchId,
     }));

@@ -792,7 +792,7 @@ export function UpsellAnalytics({
               <TriggerBreakdownCard
                 key={condition}
                 condition={condition}
-                stats={stats}
+                stats={stats as { delivered: number; accepted: number; declined: number; acceptanceRate: number }}
               />
             ))}
           </div>
@@ -940,7 +940,7 @@ export function UpsellAnalytics({
                 </tr>
               </thead>
               <tbody>
-                {revenueAttribution.revenueByTrigger.map((item) => {
+                {revenueAttribution.revenueByTrigger.map((item: { triggerCondition: string; acceptedCount: number; totalRevenue: number; avgOrderValue: number }) => {
                   const triggerCondition = item.triggerCondition as TriggerCondition;
                   const Icon = TRIGGER_ICONS[triggerCondition] || Tag;
                   const label = TRIGGER_LABELS[triggerCondition] || item.triggerCondition;

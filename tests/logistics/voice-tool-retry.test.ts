@@ -4,7 +4,10 @@
  * Validates: Requirements 16.1, 16.2, 16.3, 16.4, 16.5, 16.6
  */
 import { describe, it, expect, vi } from "vitest";
-import { isTransientError, withRetry } from "../../src/app/ws-server/logistics-tools";
+import {
+  isTransientError,
+  withRetry,
+} from "../../src/lib/modules/packs/logistics/wrappers";
 
 describe("isTransientError", () => {
   it("returns true for network errors", () => {

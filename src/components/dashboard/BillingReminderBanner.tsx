@@ -84,7 +84,7 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
     ? Math.max(0, Math.ceil((subscription.trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000)))
     : 0;
 
-  const price = plan?.pricing?.monthly ?? 0;
+  const price = plan?.priceMonthly ?? 0;
 
   return (
     <div

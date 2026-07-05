@@ -1,12 +1,42 @@
-import { nanoid } from "nanoid";
-import { createLogger } from "../../lib/logger.ts";
+/**
+ * Restaurant Pack — transport-facing API wrappers and call utilities.
+ *
+ * These are the real restaurant HTTP wrappers, upsell helpers, and call-guard
+ * utilities moved out of the legacy `src/app/ws-server/tools.ts` module as the
+ * final step of the gradual extraction (Req 1.4, 1.5, 1.6). They live here under
+ * `src/lib/modules/packs/restaurant` so that all domain-specific voice logic
+ * resides in the packs directory rather than the Voice_Runtime entry module.
+ *
+ * Two kinds of consumers use these:
+ *  - The pack tool handlers (`handlers.ts`) delegate their fetch bodies to the
+ *    `wrapper*` functions here so the executor path and the transport path share
+ *    a single implementation.
+ *  - The transport layer (`src/app/ws-server/index.ts`) calls the standalone
+ *    wrappers directly for the non-tool side-effects it still owns: call-record
+ *    upserts, transcript persistence, and inbound call blocking on `/incoming-call`.
+ *
+ * Endpoints, payload shapes, and the `x-api-key` header exactly match the legacy
+ * `tools.ts` so behavior is preserved after legacy removal (task 4.8).
+ *
+ * Requirements: 1.4, 1.5, 1.6
+ */
 
-const logger = createLogger("ws-server-tools");
+import { createLogger } from "@/lib/logger";
 
+const logger = createLogger("restaurant-pack-wrappers");
+
+/** Base URL of the Next.js app that hosts the internal restaurant API. */
 const NEXT_APP_URL = process.env.NEXT_APP_URL || "http://localhost:3000";
 
-// Type definitions for API calls
-interface CallData {
+// Each wrapper inlines the `x-api-key` header (rather than sharing a helper) so
+// the authenticated-fetch contract is visible in every function body, matching
+// the legacy `tools.ts` exactly.
+
+// ============================================================================
+// Type definitions (moved verbatim from the legacy tools.ts)
+// ============================================================================
+
+export interface CallData {
   callId: string | null;
   restaurantId?: string;
   phoneNumber?: string | null;
@@ -18,7 +48,7 @@ interface CallData {
   correlationId?: string;
 }
 
-interface TranscriptData {
+export interface TranscriptData {
   callId: string | null;
   dialogue: string;
   speaker: "ai" | "human";
@@ -26,13 +56,13 @@ interface TranscriptData {
   correlationId?: string;
 }
 
-interface OrderItem {
+export interface OrderItem {
   name: string;
   quantity: number;
   price: number;
 }
 
-interface OrderData {
+export interface OrderData {
   orderId: string;
   restaurantId: string;
   callId?: string | null;
@@ -42,8 +72,12 @@ interface OrderData {
   status: "active" | "completed" | "cancelled";
 }
 
+// ============================================================================
+// Core restaurant API wrappers
+// ============================================================================
+
 /**
- * Fetches restaurant details from the API
+ * Fetches restaurant details from the API.
  */
 export async function wrapperGetRestaurantDetails(restaurantId: string): Promise<unknown> {
   if (!restaurantId) {
@@ -51,85 +85,63 @@ export async function wrapperGetRestaurantDetails(restaurantId: string): Promise
   }
   const response = await fetch(`${NEXT_APP_URL}/api/v1/get-restaurant-data/${restaurantId}`, {
     headers: {
-      "x-api-key": process.env.INTERNAL_API_KEY || ""
-    }
+      "x-api-key": process.env.INTERNAL_API_KEY || "",
+    },
   });
   const data = await response.json();
   return data;
 }
 
 /**
- * Inserts or updates call data in the database
+ * Inserts or updates call data in the database.
  */
 export async function wrapperUpsertCallData(callData: CallData): Promise<unknown> {
   const response = await fetch(`${NEXT_APP_URL}/api/v1/upsert-call`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.INTERNAL_API_KEY || ""
+      "x-api-key": process.env.INTERNAL_API_KEY || "",
     },
-    body: JSON.stringify(callData)
+    body: JSON.stringify(callData),
   });
   const data = await response.json();
   return data;
 }
 
 /**
- * Add dialogues for the final transcript
+ * Adds dialogues for the final transcript.
  */
 export async function wrapperAddTranscriptDialogues(dialogueData: TranscriptData): Promise<unknown> {
   const response = await fetch(`${NEXT_APP_URL}/api/v1/add-transcript-dialogue`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.INTERNAL_API_KEY || ""
+      "x-api-key": process.env.INTERNAL_API_KEY || "",
     },
-    body: JSON.stringify(dialogueData)
+    body: JSON.stringify(dialogueData),
   });
   const data = await response.json();
   return data;
 }
 
 /**
- * Inserts or updates order data in the database
+ * Inserts or updates order data in the database.
  */
 export async function wrapperUpsertOrders(orderData: OrderData): Promise<unknown> {
   const response = await fetch(`${NEXT_APP_URL}/api/v1/upsert-order`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": process.env.INTERNAL_API_KEY || ""
+      "x-api-key": process.env.INTERNAL_API_KEY || "",
     },
-    body: JSON.stringify(orderData)
+    body: JSON.stringify(orderData),
   });
   const data = await response.json();
   return data;
 }
 
-/**
- * Generates a high-entropy internal order ID using nanoid
- */
-export function generateOrderId(): string {
-  return `ord_${nanoid(16)}`;
-}
-
-const PUBLIC_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
-
-/**
- * Generates a 6-char uppercase alphanumeric public order code
- * for customer-facing references (voice readback, dashboard display)
- */
-export function generatePublicOrderCode(): string {
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += PUBLIC_CODE_CHARS[Math.floor(Math.random() * PUBLIC_CODE_CHARS.length)];
-  }
-  return code;
-}
-
 // ============================================================================
-// Upsell/Cross-sell Prompt Tools
-// Requirements: 24.3, 24.6
+// Upsell/Cross-sell prompt wrappers (Requirements 24.3, 24.6)
 // ============================================================================
 
 interface OrderContext {
@@ -177,20 +189,10 @@ interface RecordAcceptanceResponse {
 }
 
 /**
- * Fetches matching upsell/cross-sell prompts based on order context
- * and records the delivery for tracking purposes.
- * 
- * This function should be called by the AI agent when building an order
- * to get relevant upsell suggestions to offer the customer.
- * 
+ * Fetches matching upsell/cross-sell prompts based on order context and records
+ * the delivery for tracking purposes.
+ *
  * Requirements: 24.3, 24.6
- * 
- * @param restaurantId - The restaurant ID
- * @param orderId - The current order ID
- * @param orderContext - Context about the current order (total, categories, etc.)
- * @param callId - Optional call ID for tracking
- * @param branchId - Optional branch ID for branch-specific prompts
- * @returns Matching prompts with their delivery IDs for acceptance tracking
  */
 export async function wrapperMatchUpsellPrompts(
   restaurantId: string,
@@ -219,11 +221,11 @@ export async function wrapperMatchUpsellPrompts(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.INTERNAL_API_KEY || ""
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
     });
-    
+
     const data = await response.json();
     return data;
   } catch (error) {
@@ -234,15 +236,8 @@ export async function wrapperMatchUpsellPrompts(
 
 /**
  * Records whether a customer accepted or declined an upsell prompt.
- * 
- * This function should be called by the AI agent after delivering a prompt
- * to track whether the customer accepted the upsell suggestion.
- * 
+ *
  * Requirements: 24.6
- * 
- * @param deliveryId - The delivery ID returned from wrapperMatchUpsellPrompts
- * @param accepted - Whether the customer accepted the upsell
- * @returns Success status
  */
 export async function wrapperRecordPromptAcceptance(
   deliveryId: string,
@@ -257,11 +252,11 @@ export async function wrapperRecordPromptAcceptance(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.INTERNAL_API_KEY || ""
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
       },
-      body: JSON.stringify({ deliveryId, accepted })
+      body: JSON.stringify({ deliveryId, accepted }),
     });
-    
+
     const data = await response.json();
     return data;
   } catch (error) {
@@ -271,19 +266,15 @@ export async function wrapperRecordPromptAcceptance(
 }
 
 /**
- * Helper function to extract item categories from order items.
- * This can be used to build the orderContext for prompt matching.
- * 
- * @param items - Array of order items
- * @param menuItems - Array of menu items with category information
- * @returns Array of unique category names
+ * Extracts unique item categories from order items, using the restaurant's menu
+ * items for category lookup. Used to build the orderContext for prompt matching.
  */
 export function extractItemCategories(
   items: OrderItem[],
   menuItems: Array<{ name: string; category?: string }>
 ): string[] {
   const categories = new Set<string>();
-  
+
   for (const item of items) {
     const menuItem = menuItems.find(
       (mi) => mi.name.toLowerCase() === item.name.toLowerCase()
@@ -292,30 +283,25 @@ export function extractItemCategories(
       categories.add(menuItem.category);
     }
   }
-  
+
   return Array.from(categories);
 }
 
 /**
- * Helper function to calculate order total from items.
- * 
- * @param items - Array of order items
- * @returns Total order amount
+ * Calculates the order total from its items.
  */
 export function calculateOrderTotal(items: OrderItem[]): number {
-  return items.reduce((total, item) => total + (item.price * item.quantity), 0);
+  return items.reduce((total, item) => total + item.price * item.quantity, 0);
 }
 
-
 // ============================================================================
-// Call Blocking Tools
-// Requirements: 25.4
+// Call blocking / verification utilities (Requirements 25.4)
 // ============================================================================
 
 interface CheckBlockedResponse {
   success: boolean;
   data?: {
-    action: 'allow' | 'block' | 'require_verification';
+    action: "allow" | "block" | "require_verification";
     isBlocked: boolean;
     hasActiveSignals: boolean;
     reason: string;
@@ -330,19 +316,10 @@ interface CheckBlockedResponse {
 }
 
 /**
- * Checks if a phone number is blocked or requires verification
- * based on fraud signals in the system.
- * 
- * This function should be called at the start of a call to determine
- * if the call should be:
- * - 'allow': Process normally
- * - 'block': Reject the call
- * - 'require_verification': Transfer to human agent for verification
- * 
+ * Checks if a phone number is blocked or requires verification based on fraud
+ * signals in the system.
+ *
  * Requirements: 25.4
- * 
- * @param phoneNumber - The phone number to check
- * @returns CheckBlockedResponse with action and details
  */
 export async function wrapperCheckBlocked(
   phoneNumber: string
@@ -356,11 +333,11 @@ export async function wrapperCheckBlocked(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.INTERNAL_API_KEY || ""
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
       },
-      body: JSON.stringify({ phoneNumber })
+      body: JSON.stringify({ phoneNumber }),
     });
-    
+
     const data = await response.json();
     return data;
   } catch (error) {
@@ -370,13 +347,12 @@ export async function wrapperCheckBlocked(
 }
 
 /**
- * Generates a TwiML response to reject a blocked call
- * 
- * @param reason - Optional reason for rejection to include in the message
- * @returns TwiML string to reject the call
+ * Generates a TwiML response to reject a blocked call.
  */
 export function generateBlockedCallTwiML(reason?: string): string {
-  const message = reason || "We're sorry, but we cannot process your call at this time. Please contact the restaurant directly.";
+  const message =
+    reason ||
+    "We're sorry, but we cannot process your call at this time. Please contact the restaurant directly.";
   return `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
       <Say voice="alice">${message}</Say>
@@ -385,10 +361,7 @@ export function generateBlockedCallTwiML(reason?: string): string {
 }
 
 /**
- * Generates a TwiML response to transfer a call for verification
- * 
- * @param verificationNumber - The phone number to transfer to for verification
- * @returns TwiML string to transfer the call
+ * Generates a TwiML response to transfer a call for verification.
  */
 export function generateVerificationTransferTwiML(verificationNumber: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>

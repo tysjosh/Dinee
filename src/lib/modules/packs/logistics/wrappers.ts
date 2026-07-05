@@ -1,17 +1,25 @@
 /**
- * Logistics Voice Agent Tool Pack
+ * Logistics Pack — voice tool wrapper functions and retry utilities.
  *
- * Wrapper functions for logistics operations called by the voice agent.
- * Each tool calls the corresponding logistics API endpoint internally,
- * following the same pattern as restaurant tools in tools.ts.
+ * The real logistics operations (shipment create/update, rider assignment,
+ * event append, delivery quoting, organization lookup) plus the transient-error
+ * retry helpers, moved out of the legacy `src/app/ws-server/logistics-tools.ts`
+ * module as the final step of the gradual extraction (Req 1.4, 1.5, 1.6). They
+ * now live under `src/lib/modules/packs/logistics` so all domain-specific voice
+ * logic resides in the packs directory rather than the Voice_Runtime entry
+ * module.
  *
- * @module ws-server/logistics-tools
- * @requirements 12.1, 12.2, 12.3, 12.4, 12.5
+ * The pack tool handlers (`handlers.ts`) adapt the executor's `(args, ctx)`
+ * calling convention to these positional wrappers. Endpoints, payload shapes,
+ * headers, and retry semantics exactly match the legacy module so behavior is
+ * preserved after legacy removal (task 4.8).
+ *
+ * @requirements 1.4, 1.5, 1.6, 12.1, 12.2, 12.3, 12.4, 12.5
  */
 
-import { createLogger } from "../../lib/logger";
+import { createLogger } from "@/lib/logger";
 
-const logger = createLogger("ws-server-logistics-tools");
+const logger = createLogger("logistics-pack-wrappers");
 
 const NEXT_APP_URL = process.env.NEXT_APP_URL || "http://localhost:3000";
 
@@ -274,17 +282,6 @@ export async function wrapperAssignRider(shipmentId: string, riderId: string, co
 }
 
 /**
- * Adds a shipment event by triggering a status update with event metadata.
- * Events are created as side effects of status changes via the status endpoint.
- * When used purely for event logging (no status change), it posts to the status
- * endpoint with the current status and event metadata in actorType/actorId.
- * Requirement 12.4
- * @param shipmentId - Shipment to add event to
- * @param eventType - Type of event
- * @param payload - Event payload
- * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
- */
-export /**
  * Voice tool: Append an event to the shipment event log.
  *
  * Calls the Convex `createShipmentEvent` mutation directly instead of
@@ -293,8 +290,12 @@ export /**
  * status transitions.
  *
  * @requirements 12.4
+ * @param shipmentId - Shipment to add event to
+ * @param eventType - Type of event
+ * @param payload - Event payload
+ * @param correlationId - Optional voice session correlation ID (Req 17.2, 17.3)
  */
-async function wrapperAddShipmentEvent(
+export async function wrapperAddShipmentEvent(
   shipmentId: string,
   eventType: string,
   payload: Record<string, unknown>,
@@ -314,10 +315,11 @@ async function wrapperAddShipmentEvent(
         throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
       }
 
-      // Lazy imports — avoids breaking test files that import utility functions
-      // from this module but don't need the Convex client
+      // Lazy imports — avoids pulling the Convex client into test files that
+      // import only the utility functions from this module, and keeps the
+      // dynamically-typed mutation result (matching the legacy module).
       const { ConvexHttpClient } = require("convex/browser");
-      const { api } = require("../../convex/_generated/api.js");
+      const { api } = require("../../../../../convex/_generated/api.js");
       const convexClient = new ConvexHttpClient(convexUrl);
 
       const eventId = `evt_${shipmentId}_${eventType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -359,7 +361,6 @@ async function wrapperAddShipmentEvent(
     return { success: false, error: "Sorry, I could not add the shipment event right now. Please try again shortly." };
   }
 }
-
 
 /**
  * Returns a delivery cost and ETA estimate based on service type.
@@ -420,9 +421,10 @@ export async function wrapperGetOrganizationDetails(
         throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
       }
 
-      // Lazy imports to avoid breaking test files that import utility functions
+      // Lazy imports to avoid pulling the Convex client into utility-only test
+      // imports of this module.
       const { ConvexHttpClient } = require("convex/browser");
-      const { api } = require("../../convex/_generated/api.js");
+      const { api } = require("../../../../../convex/_generated/api.js");
       const convexClient = new ConvexHttpClient(convexUrl);
 
       const organization = await convexClient.query(

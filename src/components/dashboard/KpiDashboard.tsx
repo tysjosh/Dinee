@@ -86,7 +86,7 @@ const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots: propSnapshots })
   const queryVertical = selectedVertical === "all" ? "restaurant" : selectedVertical;
   const convexSnapshots = useQuery(api.kpiSnapshots.getLatestSnapshots, { vertical: queryVertical });
 
-  const snapshots = propSnapshots ?? convexSnapshots ?? [];
+  const snapshots: KpiSnapshot[] = propSnapshots ?? convexSnapshots ?? [];
 
   const now = Date.now();
   const rangeStart = now - selectedRange * 24 * 60 * 60 * 1000;

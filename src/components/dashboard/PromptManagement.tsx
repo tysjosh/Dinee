@@ -638,7 +638,7 @@ export function PromptManagement({
   const filteredPrompts = useMemo(() => {
     if (!prompts) return [];
     
-    return prompts.filter((prompt) => {
+    return prompts.filter((prompt: Prompt) => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -772,8 +772,8 @@ export function PromptManagement({
     if (!prompts) return { total: 0, active: 0, inactive: 0 };
     return {
       total: prompts.length,
-      active: prompts.filter(p => p.isActive).length,
-      inactive: prompts.filter(p => !p.isActive).length,
+      active: prompts.filter((p: Prompt) => p.isActive).length,
+      inactive: prompts.filter((p: Prompt) => !p.isActive).length,
     };
   }, [prompts]);
 
@@ -923,7 +923,7 @@ export function PromptManagement({
             </div>
           )
         ) : (
-          filteredPrompts.map((prompt) => (
+          filteredPrompts.map((prompt: Prompt) => (
             <PromptCard
               key={prompt._id}
               prompt={prompt as Prompt}

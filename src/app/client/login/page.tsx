@@ -35,10 +35,12 @@ export default function LoginPage() {
     if (!loginSuccess || userLoading || !isAuthenticated) return;
 
     if (user) {
-      // Update last login timestamp
-      updateLastLogin({ userId: user.userId }).catch(() => {
-        // Non-critical — don't block redirect
-      });
+      // Update last login timestamp (userId is optional on the users doc)
+      if (user.userId) {
+        updateLastLogin({ userId: user.userId }).catch(() => {
+          // Non-critical — don't block redirect
+        });
+      }
 
       // Redirect based on onboarding status
       if (!user.tenantId) {

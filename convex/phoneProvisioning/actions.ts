@@ -2,10 +2,12 @@
  * Phone Number Provisioning — Provider API Actions
  *
  * Convex actions for interacting with external telecom provider APIs.
- * Actions can perform side effects (HTTP calls to Twilio, Vonage, etc.)
- * and call internal mutations/actions via ctx.runMutation / ctx.runAction.
+ * Actions can perform side effects (HTTP calls to Twilio, Africa's Talking,
+ * Termii) and call internal mutations/actions via ctx.runMutation / ctx.runAction.
  *
- * All provider API calls are stubbed with TODOs for real integration.
+ * Provider adapters live in ./providers/ and implement a uniform interface.
+ * Twilio uses its Node.js SDK, Africa's Talking uses its npm SDK + REST,
+ * Termii uses direct REST API calls. Vonage is stubbed for future use.
  *
  * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 3.6, 4.3, 6.1,
  *               6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 8.1, 12.3, 12.4
@@ -31,6 +33,7 @@ import {
   getBackoffDelay,
   validateE164,
 } from "./providerRouting";
+import { getProviderAdapter } from "./providers";
 
 // ─── Structured logger (mirrors mutations.ts pattern) ───────────────────────
 
@@ -56,36 +59,9 @@ function createLogger(module: string) {
 
 const logger = createLogger("phoneProvisioning/actions");
 
-
-// ─── Stub: Country code to dialing prefix mapping ───────────────────────────
-
-const COUNTRY_DIALING_PREFIXES: Record<string, string> = {
-  NG: "+234",
-  GH: "+233",
-  KE: "+254",
-  ZA: "+27",
-  US: "+1",
-  GB: "+44",
-};
-
-function generateStubE164(countryCode: string): string {
-  const prefix = COUNTRY_DIALING_PREFIXES[countryCode] ?? "+1";
-  const digits = Array.from({ length: 10 }, () => Math.floor(Math.random() * 10)).join("");
-  return `${prefix}${digits}`;
-}
-
-// ─── Stub: Provider monthly cost defaults ───────────────────────────────────
-
-const PROVIDER_COST_DEFAULTS: Record<TelecomProvider, { cost: number; currency: string }> = {
-  twilio: { cost: 1.0, currency: "USD" },
-  vonage: { cost: 0.9, currency: "USD" },
-  africas_talking: { cost: 0.5, currency: "USD" },
-  termii: { cost: 0.4, currency: "USD" },
-};
-
 // ─── 1. purchaseNumberFromProvider ──────────────────────────────────────────
 // Req 2.4, 2.7, 8.1
-// Calls provider API (stubbed) to purchase a number, validates voice capability,
+// Calls provider API to purchase a number, validates voice capability,
 // returns number SID, E.164 number, monthly cost, currency.
 
 export const purchaseNumberFromProvider = internalAction({
@@ -113,27 +89,40 @@ export const purchaseNumberFromProvider = internalAction({
     });
 
     try {
-      // TODO: Replace with real provider API calls
-      // - Twilio: client.incomingPhoneNumbers.create({ ... })
-      // - Vonage: vonage.numbers.buy({ ... })
-      // - Africa's Talking: at.voice.fetchAvailableNumbers({ ... })
-      // - Termii: fetch("https://api.ng.termii.com/api/numbers/buy", { ... })
+      const adapter = getProviderAdapter(provider as TelecomProvider);
+      const result = await adapter.purchaseNumber(region, countryCode);
 
-      // Stub: generate a fake number and SID
-      const phoneNumber = generateStubE164(countryCode);
-      const numberSid = `SID_${provider}_${crypto.randomUUID().slice(0, 8)}`;
-      const { cost, currency } = PROVIDER_COST_DEFAULTS[provider as TelecomProvider];
+      if (!result.success) {
+        logger.warn("Provider purchase failed", {
+          action: "purchase",
+          provider,
+          region,
+          countryCode,
+          error: result.error,
+          errorCode: result.errorCode,
+        });
+        return {
+          success: false,
+          error: result.error,
+          errorCode: result.errorCode,
+        };
+      }
 
-      // Req 2.7 — validate voice capability (stub always includes voice)
-      const capabilities = ["voice", "sms"];
-      if (!capabilities.includes("voice")) {
+      // Req 2.7 — validate voice capability
+      if (!result.capabilities || !result.capabilities.includes("voice")) {
         logger.warn("Purchased number lacks voice capability, rejecting", {
           action: "purchase",
           provider,
-          numberSid,
-          phoneNumber,
-          capabilities,
+          numberSid: result.numberSid,
+          phoneNumber: result.phoneNumber,
+          capabilities: result.capabilities,
         });
+        // Best-effort release of the non-voice number
+        try {
+          await adapter.releaseNumber(result.numberSid!);
+        } catch {
+          // cleanup is best-effort
+        }
         return {
           success: false,
           error: "Number does not support voice capability",
@@ -142,15 +131,15 @@ export const purchaseNumberFromProvider = internalAction({
       }
 
       // Validate E.164 format
-      if (!validateE164(phoneNumber)) {
+      if (!validateE164(result.phoneNumber!)) {
         logger.error("Provider returned invalid E.164 number", {
           action: "purchase",
           provider,
-          phoneNumber,
+          phoneNumber: result.phoneNumber,
         });
         return {
           success: false,
-          error: `Invalid E.164 format: ${phoneNumber}`,
+          error: `Invalid E.164 format: ${result.phoneNumber}`,
           errorCode: "invalid_e164",
         };
       }
@@ -158,20 +147,20 @@ export const purchaseNumberFromProvider = internalAction({
       logger.info("Number purchased successfully", {
         action: "purchase",
         provider,
-        numberSid,
-        phoneNumber,
-        monthlyCost: cost,
-        currency,
+        numberSid: result.numberSid,
+        phoneNumber: result.phoneNumber,
+        monthlyCost: result.monthlyCost,
+        currency: result.currency,
         region,
         countryCode,
       });
 
       return {
         success: true,
-        numberSid,
-        phoneNumber,
-        monthlyCost: cost,
-        currency,
+        numberSid: result.numberSid,
+        phoneNumber: result.phoneNumber,
+        monthlyCost: result.monthlyCost,
+        currency: result.currency,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -213,13 +202,20 @@ export const configureWebhook = internalAction({
     });
 
     try {
-      // TODO: Replace with real provider API calls
-      // - Twilio: client.incomingPhoneNumbers(sid).update({ voiceUrl: webhookUrl })
-      // - Vonage: vonage.numbers.update({ ... voiceCallbackValue: webhookUrl })
-      // - Africa's Talking: at.voice.updateNumber({ phoneNumber, callbackUrl: webhookUrl })
-      // - Termii: fetch("https://api.ng.termii.com/api/numbers/update", { ... })
+      const adapter = getProviderAdapter(provider as TelecomProvider);
+      const result = await adapter.configureWebhook(providerNumberSid, webhookUrl);
 
-      // Stub: no-op success
+      if (!result.success) {
+        logger.error("Failed to configure webhook", {
+          action: "configure_webhook",
+          provider,
+          providerNumberSid,
+          webhookUrl,
+          error: result.error,
+        });
+        return result;
+      }
+
       logger.info("Webhook configured successfully", {
         action: "configure_webhook",
         provider,
@@ -261,13 +257,19 @@ export const releaseNumberAtProvider = internalAction({
     });
 
     try {
-      // TODO: Replace with real provider API calls
-      // - Twilio: client.incomingPhoneNumbers(sid).remove()
-      // - Vonage: vonage.numbers.cancel({ ... })
-      // - Africa's Talking: at.voice.releaseNumber({ phoneNumber })
-      // - Termii: fetch("https://api.ng.termii.com/api/numbers/release", { ... })
+      const adapter = getProviderAdapter(provider as TelecomProvider);
+      const result = await adapter.releaseNumber(providerNumberSid);
 
-      // Stub: no-op success
+      if (!result.success) {
+        logger.error("Failed to release number at provider", {
+          action: "release_at_provider",
+          provider,
+          providerNumberSid,
+          error: result.error,
+        });
+        return result;
+      }
+
       logger.info("Number released at provider successfully", {
         action: "release_at_provider",
         provider,
@@ -310,14 +312,20 @@ export const checkNumberHealth = internalAction({
     });
 
     try {
-      // TODO: Replace with real provider API calls
-      // - Twilio: client.incomingPhoneNumbers(sid).fetch() → check status & voiceUrl
-      // - Vonage: vonage.numbers.get({ ... }) → check features & voiceCallbackValue
-      // - Africa's Talking: at.voice.fetchNumber({ phoneNumber }) → check status
-      // - Termii: fetch("https://api.ng.termii.com/api/numbers/status", { ... })
+      const adapter = getProviderAdapter(provider as TelecomProvider);
+      const result = await adapter.checkHealth(providerNumberSid);
 
-      // Stub: always return healthy
-      return { healthStatus: "healthy" };
+      if (result.healthStatus !== "healthy") {
+        logger.warn("Number health issue detected", {
+          action: "health_check",
+          provider,
+          providerNumberSid,
+          healthStatus: result.healthStatus,
+          details: result.details,
+        });
+      }
+
+      return result;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("Health check failed", {
@@ -326,7 +334,6 @@ export const checkNumberHealth = internalAction({
         providerNumberSid,
         error: message,
       });
-      // If we can't reach the provider, the number is unreachable
       return { healthStatus: "unreachable", details: message };
     }
   },

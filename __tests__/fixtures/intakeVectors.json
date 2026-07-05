@@ -1,0 +1,228 @@
+{
+  "$comment": "Shared cross-language HMAC/canonicalization test vectors for the Runsheet Intake_Contract. Both the Dinee TypeScript client (canonicalizeIntake/signIntake) and the Runsheet Python Voice_Intake_Adapter MUST reproduce `canonical` from `payload` and `signature` = lowercase-hex HMAC-SHA256(canonical, secret). Proves TypeScript signing matches Python verification for identical payloads (Requirement 11.7).",
+  "canonicalization": {
+    "method": "raw",
+    "description": "Deterministic JSON: recursively sorted object keys (UTF-16 code-unit order), ES6 number formatting, minimal JSON string escaping, no insignificant whitespace, undefined members omitted.",
+    "signature": {
+      "algorithm": "HMAC-SHA256",
+      "encoding": "lowercase-hex",
+      "input": "utf8 bytes of `canonical`"
+    }
+  },
+  "vectors": [
+    {
+      "name": "basic_single_turn",
+      "description": "Minimal well-formed intake with one transcript turn.",
+      "secret": "runsheet-test-secret-2f8c1a9b4d6e7f0a-shared-vector-key",
+      "payload": {
+        "schemaVersion": "1.0.0",
+        "tenantId": "tenant-lagos-01",
+        "idempotencyKey": "idem-0001",
+        "timestamp": 1730000000000,
+        "callId": "call-0001",
+        "transcriptId": "transcript-0001",
+        "transcript": [
+          {
+            "role": "caller",
+            "text": "I need 5kg of gas.",
+            "at": 1730000000123
+          }
+        ],
+        "recordingRef": "rec-0001",
+        "confidenceScore": 0.92,
+        "agentId": "agent-fuel-1",
+        "sessionId": "sess-0001",
+        "callerPhone": "+2348012345678",
+        "reviewRequired": true,
+        "extractedSlots": {
+          "product": "LPG",
+          "quantityKg": 5
+        }
+      },
+      "canonical": "{\"agentId\":\"agent-fuel-1\",\"callId\":\"call-0001\",\"callerPhone\":\"+2348012345678\",\"confidenceScore\":0.92,\"extractedSlots\":{\"product\":\"LPG\",\"quantityKg\":5},\"idempotencyKey\":\"idem-0001\",\"recordingRef\":\"rec-0001\",\"reviewRequired\":true,\"schemaVersion\":\"1.0.0\",\"sessionId\":\"sess-0001\",\"tenantId\":\"tenant-lagos-01\",\"timestamp\":1730000000000,\"transcript\":[{\"at\":1730000000123,\"role\":\"caller\",\"text\":\"I need 5kg of gas.\"}],\"transcriptId\":\"transcript-0001\"}",
+      "signature": "660930988991fc1447f899ca7e462936d782a0f75851ca0a25545e738539047c"
+    },
+    {
+      "name": "unicode_and_emoji",
+      "description": "Unicode, accented characters, emoji, and non-Latin scripts in transcript text and slots.",
+      "secret": "runsheet-test-secret-2f8c1a9b4d6e7f0a-shared-vector-key",
+      "payload": {
+        "schemaVersion": "1.0.0",
+        "tenantId": "tenant-café-δοκιμή",
+        "idempotencyKey": "idem-unicode-✓",
+        "timestamp": 1730000005000,
+        "callId": "call-uni-02",
+        "transcriptId": "transcript-uni-02",
+        "transcript": [
+          {
+            "role": "caller",
+            "text": "Quiero café ☕ y 3 litros",
+            "at": 1730000005111
+          },
+          {
+            "role": "agent",
+            "text": "Entendido — Δοκιμή 日本語 🚚",
+            "at": 1730000005222
+          }
+        ],
+        "recordingRef": "rec-café-02",
+        "confidenceScore": 0.7315,
+        "agentId": "agent-δ",
+        "sessionId": "sess-uni-02",
+        "callerPhone": "+2348000000000",
+        "reviewRequired": true,
+        "extractedSlots": {
+          "note": "naïve façade — 北京 🏙️",
+          "address": "Rúa São João, nº 12"
+        }
+      },
+      "canonical": "{\"agentId\":\"agent-δ\",\"callId\":\"call-uni-02\",\"callerPhone\":\"+2348000000000\",\"confidenceScore\":0.7315,\"extractedSlots\":{\"address\":\"Rúa São João, nº 12\",\"note\":\"naïve façade — 北京 🏙️\"},\"idempotencyKey\":\"idem-unicode-✓\",\"recordingRef\":\"rec-café-02\",\"reviewRequired\":true,\"schemaVersion\":\"1.0.0\",\"sessionId\":\"sess-uni-02\",\"tenantId\":\"tenant-café-δοκιμή\",\"timestamp\":1730000005000,\"transcript\":[{\"at\":1730000005111,\"role\":\"caller\",\"text\":\"Quiero café ☕ y 3 litros\"},{\"at\":1730000005222,\"role\":\"agent\",\"text\":\"Entendido — Δοκιμή 日本語 🚚\"}],\"transcriptId\":\"transcript-uni-02\"}",
+      "signature": "124fd6c5520027f9329abc0690392780c832aac8148f48c74acdaee68937bc3e"
+    },
+    {
+      "name": "empty_strings_and_empty_collections",
+      "description": "Empty strings, empty transcript array, empty extracted slots, and null recordingRef.",
+      "secret": "runsheet-test-secret-2f8c1a9b4d6e7f0a-shared-vector-key",
+      "payload": {
+        "schemaVersion": "1.0.0",
+        "tenantId": "",
+        "idempotencyKey": "",
+        "timestamp": 0,
+        "callId": "",
+        "transcriptId": "",
+        "transcript": [],
+        "recordingRef": null,
+        "confidenceScore": 0,
+        "agentId": "",
+        "sessionId": "",
+        "callerPhone": "",
+        "reviewRequired": false,
+        "extractedSlots": {}
+      },
+      "canonical": "{\"agentId\":\"\",\"callId\":\"\",\"callerPhone\":\"\",\"confidenceScore\":0,\"extractedSlots\":{},\"idempotencyKey\":\"\",\"recordingRef\":null,\"reviewRequired\":false,\"schemaVersion\":\"1.0.0\",\"sessionId\":\"\",\"tenantId\":\"\",\"timestamp\":0,\"transcript\":[],\"transcriptId\":\"\"}",
+      "signature": "d8a235d3ab5ce6173c85d7e5cf059f5e465ebb46ce40ff19c7342a231ebcd7dc"
+    },
+    {
+      "name": "nested_objects_and_arrays",
+      "description": "Deeply nested objects and arrays in extractedSlots, unsorted keys, to exercise recursive key sorting.",
+      "secret": "runsheet-test-secret-2f8c1a9b4d6e7f0a-shared-vector-key",
+      "payload": {
+        "schemaVersion": "1.2.0",
+        "tenantId": "tenant-nested-03",
+        "idempotencyKey": "idem-nested-03",
+        "timestamp": 1730000010000,
+        "callId": "call-nested-03",
+        "transcriptId": "transcript-nested-03",
+        "transcript": [
+          {
+            "role": "caller",
+            "text": "Deliver to two sites.",
+            "at": 1730000010001
+          }
+        ],
+        "recordingRef": "rec-nested-03",
+        "confidenceScore": 0.5,
+        "agentId": "agent-nested",
+        "sessionId": "sess-nested-03",
+        "callerPhone": "+2347000000001",
+        "reviewRequired": true,
+        "extractedSlots": {
+          "zebra": "last-key-alphabetically",
+          "delivery": {
+            "sites": [
+              {
+                "name": "Site B",
+                "tankKg": 50,
+                "priority": 2
+              },
+              {
+                "name": "Site A",
+                "tankKg": 100,
+                "priority": 1
+              }
+            ],
+            "window": {
+              "end": "17:00",
+              "start": "09:00"
+            }
+          },
+          "alpha": {
+            "flags": [
+              true,
+              false,
+              null
+            ],
+            "count": 3
+          },
+          "numbers": [
+            1,
+            2.5,
+            -3,
+            1000000
+          ]
+        }
+      },
+      "canonical": "{\"agentId\":\"agent-nested\",\"callId\":\"call-nested-03\",\"callerPhone\":\"+2347000000001\",\"confidenceScore\":0.5,\"extractedSlots\":{\"alpha\":{\"count\":3,\"flags\":[true,false,null]},\"delivery\":{\"sites\":[{\"name\":\"Site B\",\"priority\":2,\"tankKg\":50},{\"name\":\"Site A\",\"priority\":1,\"tankKg\":100}],\"window\":{\"end\":\"17:00\",\"start\":\"09:00\"}},\"numbers\":[1,2.5,-3,1000000],\"zebra\":\"last-key-alphabetically\"},\"idempotencyKey\":\"idem-nested-03\",\"recordingRef\":\"rec-nested-03\",\"reviewRequired\":true,\"schemaVersion\":\"1.2.0\",\"sessionId\":\"sess-nested-03\",\"tenantId\":\"tenant-nested-03\",\"timestamp\":1730000010000,\"transcript\":[{\"at\":1730000010001,\"role\":\"caller\",\"text\":\"Deliver to two sites.\"}],\"transcriptId\":\"transcript-nested-03\"}",
+      "signature": "7fba3c75c1b92d8a0e530684d852e98b18253b03f1326d89eb40a768350e55f0"
+    },
+    {
+      "name": "multi_turn_transcript",
+      "description": "Longer multi-turn dialogue alternating caller/agent, with punctuation and whitespace.",
+      "secret": "runsheet-test-secret-2f8c1a9b4d6e7f0a-shared-vector-key",
+      "payload": {
+        "schemaVersion": "1.0.0",
+        "tenantId": "tenant-multiturn-04",
+        "idempotencyKey": "idem-multiturn-04",
+        "timestamp": 1730000020000,
+        "callId": "call-multiturn-04",
+        "transcriptId": "transcript-multiturn-04",
+        "transcript": [
+          {
+            "role": "agent",
+            "text": "Hello, Runsheet fuel line. How can I help?",
+            "at": 1730000020001
+          },
+          {
+            "role": "caller",
+            "text": "I'd like to order diesel.",
+            "at": 1730000020500
+          },
+          {
+            "role": "agent",
+            "text": "How many litres, and to which site?",
+            "at": 1730000021000
+          },
+          {
+            "role": "caller",
+            "text": "500 litres to the Ikeja depot, please.",
+            "at": 1730000021800
+          },
+          {
+            "role": "agent",
+            "text": "Confirming: 500L diesel, Ikeja depot. Correct?",
+            "at": 1730000022400
+          },
+          {
+            "role": "caller",
+            "text": "Yes, that's correct.",
+            "at": 1730000023000
+          }
+        ],
+        "recordingRef": "rec-multiturn-04",
+        "confidenceScore": 0.8871,
+        "agentId": "agent-fuel-2",
+        "sessionId": "sess-multiturn-04",
+        "callerPhone": "+2348123456789",
+        "reviewRequired": false,
+        "extractedSlots": {
+          "product": "diesel",
+          "quantityLitres": 500,
+          "site": "Ikeja depot",
+          "confirmed": true
+        }
+      },
+      "canonical": "{\"agentId\":\"agent-fuel-2\",\"callId\":\"call-multiturn-04\",\"callerPhone\":\"+2348123456789\",\"confidenceScore\":0.8871,\"extractedSlots\":{\"confirmed\":true,\"product\":\"diesel\",\"quantityLitres\":500,\"site\":\"Ikeja depot\"},\"idempotencyKey\":\"idem-multiturn-04\",\"recordingRef\":\"rec-multiturn-04\",\"reviewRequired\":false,\"schemaVersion\":\"1.0.0\",\"sessionId\":\"sess-multiturn-04\",\"tenantId\":\"tenant-multiturn-04\",\"timestamp\":1730000020000,\"transcript\":[{\"at\":1730000020001,\"role\":\"agent\",\"text\":\"Hello, Runsheet fuel line. How can I help?\"},{\"at\":1730000020500,\"role\":\"caller\",\"text\":\"I'd like to order diesel.\"},{\"at\":1730000021000,\"role\":\"agent\",\"text\":\"How many litres, and to which site?\"},{\"at\":1730000021800,\"role\":\"caller\",\"text\":\"500 litres to the Ikeja depot, please.\"},{\"at\":1730000022400,\"role\":\"agent\",\"text\":\"Confirming: 500L diesel, Ikeja depot. Correct?\"},{\"at\":1730000023000,\"role\":\"caller\",\"text\":\"Yes, that's correct.\"}],\"transcriptId\":\"transcript-multiturn-04\"}",
+      "signature": "db839126d6fd1eb51f5616ccfc39b449c9a2e47d9959d3ad5ecd9a24959eba64"
+    }
+  ]
+}

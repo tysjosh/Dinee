@@ -138,6 +138,8 @@ export interface Subscription {
   createdAt: number;
   /** When the subscription was cancelled (if applicable) */
   cancelledAt?: number;
+  /** Whether the subscription is set to cancel at the end of the current period (set via setCancelAtPeriodEnd) */
+  cancelAtPeriodEnd?: boolean;
   /** Billing cycle */
   billingCycle: BillingCycle;
   /** When trial ends (if applicable) */

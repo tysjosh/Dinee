@@ -8,6 +8,7 @@
  */
 
 import { api } from "../../../../../../../convex/_generated/api";
+import type { Doc } from "../../../../../../../convex/_generated/dataModel";
 import { ConvexHttpClient } from "convex/browser";
 import { NextRequest, NextResponse } from "next/server";
 import { validateInternalApiKey } from "@/lib/internal-auth";
@@ -221,7 +222,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
 
     // Convert Convex result to FraudSignal type
-    const signals: FraudSignal[] = fraudSignalsResult.map((signal) => ({
+    const signals: FraudSignal[] = fraudSignalsResult.map((signal: Doc<"fraudSignals">) => ({
       phoneNumber: signal.phoneNumber,
       signalType: signal.signalType as FraudSignalType,
       signalCount: signal.signalCount,

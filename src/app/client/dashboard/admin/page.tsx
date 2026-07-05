@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
+import type { Doc } from "../../../../../convex/_generated/dataModel";
 import { useTenant } from "@/contexts/TenantContext";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
@@ -188,7 +189,15 @@ export default function AdminPage() {
           <RestaurantTable restaurants={restaurants ?? []} subscriptionMap={subscriptionMap} />
         ) : (
           <UserTable
-            users={users ?? []}
+            users={(users ?? []).map((u: Doc<"users">) => ({
+              userId: u.userId ?? "",
+              email: u.email ?? "",
+              role: u.role ?? "",
+              tenantType: u.tenantType ?? "",
+              tenantId: u.tenantId ?? "",
+              lastLoginAt: u.lastLoginAt,
+              _id: u._id,
+            }))}
             onRoleChange={handleRoleChange}
             onDeactivate={handleDeactivate}
           />

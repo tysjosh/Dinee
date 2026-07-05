@@ -2,5 +2,5 @@
   "watch": ["src/app/ws-server"],
   "ext": "ts,js",
   "ignore": ["src/app/ws-server/**/*.spec.ts"],
-  "exec": "ts-node src/app/ws-server/index.ts"
+  "exec": "TS_NODE_PROJECT=tsconfig.server.dev.json TS_NODE_TRANSPILE_ONLY=true node -r ts-node/register -r tsconfig-paths/register src/app/ws-server/index.ts"
 }

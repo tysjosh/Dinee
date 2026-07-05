@@ -4,17 +4,39 @@
  * **Validates: Requirements 27.1, 27.2, 27.4**
  *
  * Property 10: Tools are only accessible in their allowed phases
- * - For all (phase, tool) pairs not in ALLOWED_TOOLS: isLogisticsToolAllowed returns false
+ * - For all (phase, tool) pairs not in ALLOWED_TOOLS: gating returns false
  * - For all (phase, tool) pairs in ALLOWED_TOOLS: returns true
  * - No shipment mutation tools are accessible in await_org_verification phase
+ *
+ * The legacy `logistics-call-phase.ts` module was removed in dinee-voice-platform
+ * task 4.8. Phase gating now lives in the logistics VoiceDomainPack: the generic
+ * `phaseEngine.nextPhase` drives transitions over `logisticsPhases`, and the
+ * registry's `isToolCallPermitted` gates the resolved tool set. This test targets
+ * that pack-driven implementation, preserving the original Property 10 contract.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import fc from "fast-check";
+import { nextPhase } from "../../src/app/ws-server/runtime/phaseEngine";
+import { logisticsPhases } from "../../src/lib/modules/packs/logistics/phases";
 import {
-  type LogisticsCallPhase,
-  isLogisticsToolAllowed,
-  nextLogisticsPhase,
-} from "../../src/app/ws-server/logistics-call-phase";
+  logisticsVoicePack,
+  registerLogisticsVoicePack,
+} from "../../src/lib/modules/packs/logistics";
+import {
+  resolveToolSet,
+  isToolCallPermitted,
+  clearRegistry as clearVoiceRegistry,
+} from "../../src/lib/modules/voiceDomainPackRegistry";
+import {
+  clearRegistry as clearModuleRegistry,
+} from "../../src/lib/modules/toolPackRegistry";
+import type { VoiceToolDefinition } from "../../src/lib/modules/voiceDomainPack";
+
+type LogisticsCallPhase =
+  | "await_org_verification"
+  | "org_verified"
+  | "shipment_open"
+  | "shipment_confirmed";
 
 const ALL_PHASES: LogisticsCallPhase[] = [
   "await_org_verification",
@@ -53,6 +75,27 @@ const ALLOWED_TOOLS: Record<LogisticsCallPhase, Set<string>> = {
   ]),
   shipment_confirmed: new Set(["get_organization_details", "quote_delivery"]),
 };
+
+// The pack-driven gating implementations under test. The resolved tool set is
+// built once from the registered logistics pack; `isToolCallPermitted` enforces
+// membership + phase, exactly as the Voice_Runtime does at dispatch time.
+let logisticsToolSet: VoiceToolDefinition[];
+
+function isLogisticsToolAllowed(phase: string, tool: string): boolean {
+  return isToolCallPermitted(logisticsToolSet, tool, phase).permitted;
+}
+
+function nextLogisticsPhase(phase: string, event: string): string {
+  return nextPhase(logisticsPhases, phase, event);
+}
+
+beforeAll(() => {
+  clearVoiceRegistry();
+  clearModuleRegistry();
+  const result = registerLogisticsVoicePack();
+  expect(result.ok).toBe(true);
+  logisticsToolSet = resolveToolSet(logisticsVoicePack, []);
+});
 
 const phaseArb = fc.constantFrom(...ALL_PHASES);
 const toolArb = fc.constantFrom(...ALL_TOOLS);

@@ -59,8 +59,18 @@ export default defineSchema({
       v.literal("restaurant_owner"),
       v.literal("business_owner"),
       v.literal("branch_manager"),
-      v.literal("supervisor")
+      v.literal("supervisor"),
+      // NEW — additive member for Control Plane partner self-service
+      // (platform-control-plane Req 5.2, 4.5, 5.6). Existing rows validate as-is.
+      v.literal("partner")
     )),
+    // NEW — optional explicit Authorization_Scope override for a partner
+    // (platform-control-plane Req 5.2). When absent, a partner's scope is
+    // derived from tenantId. Optional so existing users validate unchanged.
+    authorizationScope: v.optional(v.array(v.object({
+      platformId: v.string(),
+      tenantId: v.string(),
+    }))),
     tenantType: v.optional(v.union(
       v.literal("platform"),
       v.literal("restaurant"),
@@ -1187,5 +1197,273 @@ export default defineSchema({
     .index("by_request_id", ["requestId"])
     .index("by_branch_id", ["branchId"])
     .index("by_status", ["status"])
+    .index("by_created_at", ["createdAt"]),
+
+  // Runsheet integration configuration (Dinee-owned)
+  // Per-tenant Runsheet integration configuration. Kept as a dedicated table
+  // (rather than nesting under restaurants.integrations) because Runsheet
+  // tenants are platform tenants, not restaurants. This is configuration Dinee
+  // owns; it is NOT order-of-record data (that lives in the Runsheet backend).
+  // Requirements: 8.1, 8.4, 9.1, 9.2 (dinee-voice-platform)
+  runsheetIntegrations: defineTable({
+    // Dinee platform tenant that owns this integration
+    tenantId: v.string(),
+    // Intake_Contract target base URL (Req 8.1)
+    baseUrl: v.string(),
+    // Runsheet-side tenant identifier used for tenant match (Req 8.1, 11.4)
+    runsheetTenantId: v.string(),
+    // API key stored AES-256-GCM encrypted (Req 8.1, 8.2)
+    apiKeyEncrypted: v.string(),
+    // Last 4 chars of the API key for masked display (Req 8.3)
+    apiKeyLast4: v.string(),
+    // HMAC secret for signing the Intake_Contract, encrypted (Req 8.1, 11.1)
+    webhookSecretEncrypted: v.string(),
+    // Default review mode; exactly one of the two allowed values (Req 8.4)
+    defaultReviewMode: v.union(
+      v.literal("always_review"),
+      v.literal("auto_submit_low_risk")
+    ),
+    // Conversation types this tenant is allowed to use (Req 8.1, 9.5)
+    allowedConversationTypes: v.array(v.string()),
+    // Auto_Submit config stored internally in MVP; no UI toggle surfaced (Req 9.2)
+    autoSubmitEnabled: v.boolean(),
+    // Confidence threshold for auto-submit-low-risk (Req 13.1, later phase)
+    confidenceThreshold: v.optional(v.number()),
+    // Per-tenant purchase-order requirement. Feeds the fuel-intake slot
+    // builder's RunsheetTenantConfig so the po_number slot is required for this
+    // tenant when true (Req 5.6). Optional for backward compatibility with
+    // integrations stored before this field existed.
+    requiresPurchaseOrder: v.optional(v.boolean()),
+    // Escalation target: exactly one of phone, email, or webhook (Req 9.4)
+    escalationTarget: v.optional(
+      v.object({
+        kind: v.union(
+          v.literal("phone"),
+          v.literal("email"),
+          v.literal("webhook")
+        ),
+        value: v.string(),
+      })
+    ),
+    // Connection status of the integration
+    status: v.union(
+      v.literal("connected"),
+      v.literal("disconnected"),
+      v.literal("error")
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_tenant_id", ["tenantId"])
+    .index("by_runsheet_tenant_id", ["runsheetTenantId"]),
+
+  // Runsheet phone-number -> conversation-type mapping (Dinee-owned)
+  // The routing mapping Dinee owns (Req 20.1). A tenant can map multiple numbers.
+  // Requirements: 9.1, 9.2 (dinee-voice-platform)
+  runsheetNumberAssignments: defineTable({
+    // Dinee platform tenant that owns this assignment
+    tenantId: v.string(),
+    // Dinee-managed phone number being assigned
+    phoneNumber: v.string(),
+    // Conversation type; must be in the tenant's allowedConversationTypes (Req 9.5, 9.6)
+    conversationType: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_tenant_id", ["tenantId"])
+    .index("by_phone_number", ["phoneNumber"]),
+
+  // Generic multi-platform integration configuration (Dinee-owned)
+  // Supersedes runsheetIntegrations as the config-driven, multi-platform store.
+  // Kept ADDITIVELY alongside runsheetIntegrations during the staged rollout so
+  // live Runsheet traffic is never disrupted. Keyed by (platformId, tenantId).
+  // Credentials are stored as AES-256-GCM ciphertext in a name-keyed map so any
+  // platform's credential set fits without schema changes. This is integration
+  // CONFIGURATION Dinee owns; it is NOT order-of-record data.
+  // Requirements: 2.1, 8.2, 8.3 (multi-platform-voice-integrations)
+  integrations: defineTable({
+    platformId: v.string(), // Req 2.1 — registered Platform_Id
+    tenantId: v.string(), // Req 2.1 — Dinee tenant
+    baseUrl: v.string(), // Req 2.1
+    platformTenantId: v.string(), // platform-side tenant id (e.g. Runsheet tenant)
+    // AES-256-GCM ciphertext keyed by credential name (Req 2.2). For Runsheet:
+    // { api_key: <ct>, webhook_secret: <ct> } — migrated ciphertext preserved as-is.
+    credentialsEncrypted: v.record(v.string(), v.string()),
+    // Last-4 preview per credential for masked display + audit (Req 2.8, 12.4).
+    credentialsLast4: v.record(v.string(), v.string()),
+    allowedConversationTypes: v.array(v.string()), // Req 4.3
+    // Arbitrary platform config (defaultReviewMode, autoSubmitEnabled,
+    // confidenceThreshold, requiresPurchaseOrder, escalationTarget, ...).
+    config: v.any(),
+    status: v.union( // Req 2.6, 8.2, 8.3
+      v.literal("connected"),
+      v.literal("disconnected"),
+      v.literal("error")
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_platform_tenant", ["platformId", "tenantId"])
+    .index("by_tenant_id", ["tenantId"]),
+
+  // Generic phone-number -> route mapping (Dinee-owned)
+  // Supersedes runsheetNumberAssignments. Maps an inbound "To" number to a
+  // (platformId, tenantId, conversationType). Kept ADDITIVELY during rollout.
+  // Requirements: 4.1, 4.3 (multi-platform-voice-integrations)
+  phoneRoutes: defineTable({
+    phoneNumber: v.string(), // inbound "To" number
+    platformId: v.string(), // Req 4.1
+    tenantId: v.string(), // Req 4.1
+    conversationType: v.string(), // Req 4.1 — must be in tenant's allowed set (Req 4.3)
+    createdAt: v.number(),
+  })
+    .index("by_phone_number", ["phoneNumber"])
+    .index("by_platform_tenant", ["platformId", "tenantId"]),
+
+  // Append-only credential-test history (Dinee-owned, Control Plane)
+  //
+  // One row is appended per completed Credential_Test, recording the outcome and
+  // completion timestamp for an integration identified by (platformId, tenantId)
+  // ONLY. No credential value is ever stored (platform-control-plane Req 8.2,
+  // 8.3, 8.4, 11). Append-only: no update/delete mutations are exposed. Reads
+  // take the <=100 most-recent rows via the time index in descending order.
+  credentialTestHistory: defineTable({
+    platformId: v.string(), // reference by pair only (Req 8.4)
+    tenantId: v.string(),
+    outcome: v.union(v.literal("success"), v.literal("failure")), // Req 8.2
+    completedAt: v.number(), // epoch ms; whole-second UTC for display (Req 8.2)
+  })
+    .index("by_platform_tenant", ["platformId", "tenantId"])
+    // Enables most-recent-first pagination without an in-memory sort (Req 8.3).
+    .index("by_platform_tenant_time", ["platformId", "tenantId", "completedAt"]),
+
+  // Per-agent monitoring metrics (Dinee-owned, later phase — Requirement 16)
+  //
+  // One row is written per completed call by the Monitoring_Service (Req 16.1).
+  // Storing per-call rows (rather than pre-aggregated counters) keeps the write
+  // path append-only and lets the windowed rate computation (Req 16.2) derive
+  // tool-failure / fallback / review-required / Auto_Submit rates by scanning
+  // rows over a reporting window. This is Dinee-owned monitoring data — it is
+  // NOT order-of-record data (that lives in the Runsheet backend).
+  //
+  // Requirements: 16.1 (dinee-voice-platform)
+  agentMetrics: defineTable({
+    // Dinee platform tenant that owns this metric row. Enables tenant-scoped
+    // metrics for a Runsheet_Admin (Req 16.3) and all-tenant metrics for a
+    // platform operator (Req 16.4).
+    tenantId: v.string(),
+    // The active agent identity. Agents are identified by conversation type in
+    // this platform, so `conversationType` is the per-agent grouping key
+    // (Req 16.1, 16.2).
+    conversationType: v.string(),
+    // The completed call this metric row describes (Twilio callSid).
+    callId: v.string(),
+    // Calls-received count contributed by this row (normally 1). Kept explicit
+    // so windowed aggregation can sum received vs. completed (Req 16.1, 16.2).
+    callsReceived: v.number(),
+    // Calls-completed count contributed by this row (1 when the call reached a
+    // completed state, 0 otherwise) (Req 16.1).
+    callsCompleted: v.number(),
+    // Call duration in milliseconds (Req 16.1).
+    durationMs: v.number(),
+    // Number of successful tool invocations during the call (Req 16.1).
+    toolSuccessCount: v.number(),
+    // Number of failed tool invocations during the call (Req 16.1).
+    toolFailureCount: v.number(),
+    // Whether a fallback behavior occurred during the call (Req 16.1).
+    fallbackOccurred: v.boolean(),
+    // Whether the call's outcome required dispatcher review (Req 16.1).
+    reviewRequired: v.boolean(),
+    // The Auto_Submit outcome for the call (Req 16.1). `auto_submitted` when the
+    // draft was auto-submitted, `not_eligible` when auto-submit was considered
+    // but the eligibility conjunction failed, and `not_applicable` when the
+    // tenant/agent is in review-only mode (the MVP default).
+    autoSubmitOutcome: v.union(
+      v.literal("auto_submitted"),
+      v.literal("not_eligible"),
+      v.literal("not_applicable")
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_tenant_id", ["tenantId"])
+    .index("by_agent", ["tenantId", "conversationType"])
+    .index("by_created_at", ["createdAt"]),
+
+  // Per-agent alerting (Dinee-owned, later phase — Requirement 17).
+  //
+  // The Monitoring_Service raises an alert row when a monitored condition
+  // breaches its configured threshold over the reporting window. Five alert
+  // conditions are covered:
+  //   - `dependency_failure`   — a dependency on OpenAI, Twilio, or the
+  //                              Runsheet_Backend is unreachable (Req 17.1).
+  //   - `low_confidence_rate`  — the low-confidence rate exceeds its threshold
+  //                              over the window (Req 17.2).
+  //   - `review_required_rate` — the review-required rate exceeds its
+  //                              threshold over the window (Req 17.3).
+  //   - `tool_rejection_rate`  — a tenant's tool-rejection rate exceeds its
+  //                              threshold over the window (Req 17.4).
+  //   - `auth_failure_rate`    — a tenant's authentication-failure rate
+  //                              exceeds its threshold over the window
+  //                              (Req 17.5).
+  //
+  // The rate-based rows are the persisted output of the pure evaluator in
+  // `src/lib/monitoring/alertRules.ts`, which is fed the windowed rates derived
+  // from `agentMetrics` (Req 16 / task 15.1). This is Dinee-owned monitoring
+  // data — it is NOT order-of-record data (that lives in the Runsheet backend).
+  //
+  // Requirements: 17.1, 17.2, 17.3, 17.4, 17.5 (dinee-voice-platform)
+  agentAlerts: defineTable({
+    // Dinee platform tenant this alert is scoped to. Tenant-level threshold
+    // breaches (tool-rejection, auth-failure) identify the tenant (Req 17.4,
+    // 17.5); platform-wide conditions (dependency failure, low-confidence,
+    // review-required) may use a platform sentinel tenant id.
+    tenantId: v.string(),
+    // Which monitored condition breached (Req 17.1–17.5).
+    alertType: v.union(
+      v.literal("dependency_failure"),
+      v.literal("low_confidence_rate"),
+      v.literal("review_required_rate"),
+      v.literal("tool_rejection_rate"),
+      v.literal("auth_failure_rate")
+    ),
+    // Alert severity. Dependency failures are `critical`; rate-threshold
+    // breaches are `warning` by default.
+    severity: v.union(
+      v.literal("info"),
+      v.literal("warning"),
+      v.literal("critical")
+    ),
+    // Human-readable subject of the alert — the failed dependency name for a
+    // dependency failure, or the breached rate name for a rate rule.
+    subject: v.string(),
+    // The specific failed dependency, set only for `dependency_failure`
+    // (Req 17.1).
+    dependency: v.optional(
+      v.union(
+        v.literal("openai"),
+        v.literal("twilio"),
+        v.literal("runsheet")
+      )
+    ),
+    // The configured threshold that was breached, set for rate rules
+    // (Req 17.2–17.5). Absent for dependency failures, which are not
+    // rate-based.
+    threshold: v.optional(v.number()),
+    // The observed value over the window that breached the threshold, set for
+    // rate rules (Req 17.2–17.5).
+    observedValue: v.optional(v.number()),
+    // Start of the reporting window (epoch ms) the alert was evaluated over.
+    windowStart: v.number(),
+    // End of the reporting window (epoch ms) the alert was evaluated over.
+    windowEnd: v.number(),
+    // Human-readable alert message identifying the failed dependency or the
+    // breached rate (and the tenant, for tenant-scoped rates).
+    message: v.string(),
+    createdAt: v.number(),
+    // Whether the alert has been resolved. Defaults to unresolved (false/absent)
+    // on creation.
+    resolved: v.optional(v.boolean()),
+  })
+    .index("by_tenant_id", ["tenantId"])
+    .index("by_type", ["alertType"])
     .index("by_created_at", ["createdAt"]),
 });
