@@ -1,3 +1,5 @@
+"use node";
+
 /**
  * Runtime_Credential_Service — PURE guard logic (dependency-injected).
  *

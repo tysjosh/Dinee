@@ -1,3 +1,5 @@
+"use node";
+
 /**
  * Phone Number Provisioning — Provider API Actions
  *

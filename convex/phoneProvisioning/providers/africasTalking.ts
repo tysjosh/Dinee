@@ -1,3 +1,5 @@
+"use node";
+
 /**
  * Africa's Talking provider adapter for phone number provisioning.
  *
