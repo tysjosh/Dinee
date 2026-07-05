@@ -36,6 +36,23 @@ export const RUNSHEET_DRIVER_EXCEPTION_CONVERSATION_TYPE =
   "runsheet_driver_exception";
 
 /**
+ * The conversation types Runsheet supports, surfaced in the Platform_Catalog
+ * (Control_Plane Req 1.3). These MUST mirror the conversation types declared by
+ * the Runsheet_Pack (`src/lib/modules/packs/runsheet/conversationTypes.ts`) and
+ * recognized by the router (`src/lib/call-routing/phone-lookup.ts`) and the
+ * Convex validators (`convex/shared/validators.ts`), so the catalog never
+ * advertises a type the runtime cannot route. Declared as mirrored literals
+ * (matching the existing lockstep pattern above) rather than importing the pack
+ * to keep the integrations layer free of a modules-layer dependency.
+ */
+export const RUNSHEET_SUPPORTED_CONVERSATION_TYPES = [
+  "runsheet_fuel_order_intake",
+  "runsheet_order_status",
+  RUNSHEET_DRIVER_EXCEPTION_CONVERSATION_TYPE,
+  "runsheet_dispatch_callback",
+] as const;
+
+/**
  * The Runsheet Platform_Definition. The Transport_Contract captures Runsheet's
  * exact wire behavior so the generic call path produces byte-identical signed
  * requests: `authScheme: "bearer"`, `readPathPrefix: "/voice"`,
@@ -70,11 +87,9 @@ export const runsheetPlatformDefinition: PlatformDefinition = {
   ],
   runtimeServiceTokenEnvVar: "RUNSHEET_RUNTIME_SERVICE_TOKEN",
   // Conversation types Runsheet supports, surfaced in the Platform_Catalog
-  // (Control_Plane Req 1.3). Additive and secret-free.
-  supportedConversationTypes: [
-    "runsheet_inbound_order",
-    RUNSHEET_DRIVER_EXCEPTION_CONVERSATION_TYPE,
-  ],
+  // (Control_Plane Req 1.3). Additive and secret-free. Mirrors the pack's
+  // declared types so the catalog never advertises an unroutable type.
+  supportedConversationTypes: [...RUNSHEET_SUPPORTED_CONVERSATION_TYPES],
 };
 
 /**

@@ -277,7 +277,7 @@ export default function IntegrationConfigForm({
             id="allowedTypes"
             type="text"
             className="input"
-            placeholder="runsheet_inbound_order, runsheet_driver_exception"
+            placeholder="runsheet_fuel_order_intake, runsheet_driver_exception"
             value={allowedTypesRaw}
             disabled={disabled}
             onChange={(e) => setAllowedTypesRaw(e.target.value)}
