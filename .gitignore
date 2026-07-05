@@ -39,3 +39,6 @@ next-env.d.ts
 300
 cookies.txt
 *.cookies
+
+# kiro
+.kiro/
