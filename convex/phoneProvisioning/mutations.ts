@@ -10,6 +10,7 @@
  */
 
 import { mutation, internalMutation } from "../_generated/server";
+import type { QueryCtx } from "../_generated/server";
 import { v } from "convex/values";
 import {
   healthStatusValidator,
@@ -52,9 +53,7 @@ const logger = createLogger("phoneProvisioning/mutations");
 
 // ─── Helper: check dedicated_numbers_enabled feature flag ───────────────────
 
-async function isDedicatedNumbersEnabled(
-  ctx: { db: { query: (table: string) => any } }
-): Promise<boolean> {
+async function isDedicatedNumbersEnabled(ctx: QueryCtx): Promise<boolean> {
   const flags = await ctx.db.query("featureFlags").collect();
   const flag = flags.find(
     (f: any) => f.name === "dedicated_numbers_enabled" && f.scope === "global"

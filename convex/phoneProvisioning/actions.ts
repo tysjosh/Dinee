@@ -349,11 +349,28 @@ export const checkNumberHealth = internalAction({
 // configure webhook → mark completed. On failure: retry with backoff or
 // fall back to shared number.
 
+/**
+ * The outcome of {@link executeProvisioning}. Declared explicitly so the
+ * handler is NOT inferred: the handler calls `internal.phoneProvisioning.actions.*`
+ * (its own namespace), which makes an inferred return type self-referential and
+ * poisons the namespace's generated types. An explicit annotation breaks the
+ * cycle.
+ */
+type ExecuteProvisioningResult = {
+  success: boolean;
+  error?: string;
+  reason?: string;
+  delay?: number;
+  numberId?: string;
+  phoneNumber?: string;
+  provider?: TelecomProvider;
+};
+
 export const executeProvisioning = internalAction({
   args: {
     requestId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<ExecuteProvisioningResult> => {
     const { requestId } = args;
 
     logger.info("Executing provisioning", { action: "execute_provisioning", requestId });
