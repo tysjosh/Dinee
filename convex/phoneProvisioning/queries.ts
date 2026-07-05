@@ -8,6 +8,26 @@
 import { query, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 
+// ─── Feature-flag gate for scheduled lifecycle functions ───────────────────
+
+/**
+ * Whether the global `dedicated_numbers_enabled` feature flag is on.
+ *
+ * Mirrors the gate the provisioning mutations already apply (Req 11.6) so the
+ * scheduled lifecycle actions (pool replenishment, quarantine expiry, health
+ * checks) no-op when the feature is disabled. Absent flag → disabled.
+ */
+export const isDedicatedNumbersEnabled = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<boolean> => {
+    const flags = await ctx.db.query("featureFlags").collect();
+    const flag = flags.find(
+      (f: any) => f.name === "dedicated_numbers_enabled" && f.scope === "global"
+    );
+    return flag?.enabled === true;
+  },
+});
+
 // ─── Internal query used by executeProvisioning action ──────────────────────
 
 /** Get a provisioning request by requestId (internal — for actions) */

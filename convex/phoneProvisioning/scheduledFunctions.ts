@@ -83,6 +83,18 @@ export const processQuarantineExpirations = internalAction({
   handler: async (
     ctx,
   ): Promise<{ processed: number; retained: number; released: number }> => {
+    // Req 11.6 — feature-flag gate (see replenishNumberPool).
+    const enabled = await ctx.runQuery(
+      internal.phoneProvisioning.queries.isDedicatedNumbersEnabled,
+      {},
+    );
+    if (!enabled) {
+      logger.info("Quarantine expiry skipped: dedicated numbers disabled", {
+        action: "quarantine_expiry",
+      });
+      return { processed: 0, retained: 0, released: 0 };
+    }
+
     logger.info("Processing quarantine expirations", {
       action: "quarantine_expiry",
     });
@@ -207,6 +219,20 @@ export const processQuarantineExpirations = internalAction({
 export const replenishNumberPool = internalAction({
   args: {},
   handler: async (ctx) => {
+    // Req 11.6 — feature-flag gate: skip entirely when dedicated numbers are
+    // disabled, matching the provisioning mutations so no purchases are
+    // attempted (and no provider errors are logged) while the feature is off.
+    const enabled = await ctx.runQuery(
+      internal.phoneProvisioning.queries.isDedicatedNumbersEnabled,
+      {},
+    );
+    if (!enabled) {
+      logger.info("Pool replenishment skipped: dedicated numbers disabled", {
+        action: "pool_replenish",
+      });
+      return { totalPurchased: 0, regionsChecked: 0 };
+    }
+
     logger.info("Replenishing number pool", {
       action: "pool_replenish",
     });
@@ -370,6 +396,18 @@ export const runHealthChecks = internalAction({
     degraded: number;
     unreachable: number;
   }> => {
+    // Req 11.6 — feature-flag gate (see replenishNumberPool).
+    const enabled = await ctx.runQuery(
+      internal.phoneProvisioning.queries.isDedicatedNumbersEnabled,
+      {},
+    );
+    if (!enabled) {
+      logger.info("Health checks skipped: dedicated numbers disabled", {
+        action: "health_check",
+      });
+      return { checked: 0, healthy: 0, degraded: 0, unreachable: 0 };
+    }
+
     logger.info("Running health checks on assigned numbers", {
       action: "health_check",
     });
