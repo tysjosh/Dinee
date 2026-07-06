@@ -385,6 +385,60 @@ export const activateSubscription = mutation({
 });
 
 /**
+ * Find a subscription by its Stripe subscription id (US recurring). Used by the
+ * Stripe webhook to correlate `invoice.*` / `customer.subscription.*` events.
+ */
+export const getSubscriptionByStripeSubscriptionId = query({
+  args: { stripeSubscriptionId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("subscriptions")
+      .withIndex("by_stripe_subscription_id", (q) =>
+        q.eq("stripeSubscriptionId", args.stripeSubscriptionId)
+      )
+      .first();
+  },
+});
+
+/**
+ * Link a Stripe subscription + customer to our subscription record (set when a
+ * subscription-mode Checkout completes) and mark it active for the given period.
+ */
+export const linkStripeSubscription = mutation({
+  args: {
+    subscriptionId: v.string(),
+    stripeSubscriptionId: v.string(),
+    stripeCustomerId: v.optional(v.string()),
+    currentPeriodStart: v.optional(v.number()),
+    currentPeriodEnd: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const subscription = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_subscription_id", (q) =>
+        q.eq("subscriptionId", args.subscriptionId)
+      )
+      .first();
+    if (!subscription) {
+      throw new Error(`Subscription ${args.subscriptionId} not found`);
+    }
+    await ctx.db.patch(subscription._id, {
+      stripeSubscriptionId: args.stripeSubscriptionId,
+      ...(args.stripeCustomerId ? { stripeCustomerId: args.stripeCustomerId } : {}),
+      status: "active",
+      paymentProvider: "stripe",
+      ...(args.currentPeriodStart !== undefined && {
+        currentPeriodStart: args.currentPeriodStart,
+      }),
+      ...(args.currentPeriodEnd !== undefined && {
+        currentPeriodEnd: args.currentPeriodEnd,
+      }),
+    });
+    return subscription._id;
+  },
+});
+
+/**
  * Update subscription status
  * @requirements 26.7 - Retry failed payments
  * @requirements 26.8 - Downgrade on persistent failure

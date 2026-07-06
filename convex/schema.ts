@@ -616,6 +616,10 @@ export default defineSchema({
       )
     ),
     paymentReference: v.optional(v.string()),
+    // Stripe recurring subscription correlation (US market). Set when a
+    // subscription-mode Checkout completes; used to match future invoice events.
+    stripeSubscriptionId: v.optional(v.string()),
+    stripeCustomerId: v.optional(v.string()),
     createdAt: v.number(),
     cancelledAt: v.optional(v.number()),
     // Billing cycle
@@ -643,7 +647,8 @@ export default defineSchema({
   })
     .index("by_subscription_id", ["subscriptionId"])
     .index("by_restaurant_id", ["restaurantId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_stripe_subscription_id", ["stripeSubscriptionId"]),
 
   // Subscription Invoices (billing history)
   // Requirements: 26.5

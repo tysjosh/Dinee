@@ -12,7 +12,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
-import { createSubscriptionService } from "@/lib/billing/SubscriptionService";
+import {
+  createSubscriptionService,
+  getPlanById,
+  getPlanPrice,
+} from "@/lib/billing/SubscriptionService";
+import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import { createLogger } from "@/lib/logger";
 import type { BillingCycle, SubscriptionPaymentProvider } from "@/lib/billing/types";
 import { getDefaultPaymentProvider } from "@/lib/region";
@@ -122,7 +127,61 @@ export async function POST(request: NextRequest) {
     // Fall back to the default (paystack) if the lookup fails.
   }
 
-  // 4. Initialize subscription with the region-selected provider.
+  // 3c. Stripe (US) → true recurring subscription via subscription-mode Checkout.
+  if (paymentProvider === "stripe") {
+    const plan = getPlanById(planId);
+    if (!plan || !plan.isActive) {
+      return NextResponse.json(
+        { error: `Plan ${planId} is not available` },
+        { status: 422 },
+      );
+    }
+    const amountMinor = Math.round(getPlanPrice(plan, "USD", billingCycle) * 100);
+    const subscriptionId = `SUB_${crypto.randomUUID()}`;
+    const stripe = createStripeProvider(callbackUrl);
+    const init = await stripe.createSubscriptionCheckout({
+      planName: `${plan.name} (${billingCycle})`,
+      amountMinor,
+      currency: "usd",
+      interval: billingCycle === "yearly" ? "year" : "month",
+      referenceId: subscriptionId,
+    });
+    if (!init.success || !init.paymentUrl) {
+      logger.error("Stripe subscription checkout failed", { restaurantId });
+      return NextResponse.json(
+        { error: init.error ?? "Failed to initialize checkout" },
+        { status: 422 },
+      );
+    }
+    const now = Date.now();
+    const periodEnd = new Date(now);
+    if (billingCycle === "yearly") periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    else periodEnd.setMonth(periodEnd.getMonth() + 1);
+    try {
+      await convexClient.mutation(api.subscriptions.createSubscription, {
+        subscriptionId,
+        restaurantId,
+        planId,
+        status: "pending", // activated by the Stripe webhook on checkout completion
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd.getTime(),
+        paymentProvider: "stripe",
+        paymentReference: init.reference,
+        billingCycle,
+      });
+    } catch (convexError) {
+      const msg = convexError instanceof Error ? convexError.message : "Unknown Convex error";
+      logger.error(`Failed to save Stripe subscription record: ${msg}`, { restaurantId });
+      return NextResponse.json(
+        { error: "Failed to save subscription record" },
+        { status: 500 },
+      );
+    }
+    logger.info("Stripe subscription checkout created", { restaurantId, orderId: subscriptionId });
+    return NextResponse.json({ checkoutUrl: init.paymentUrl }, { status: 200 });
+  }
+
+  // 4. Initialize subscription with the region-selected provider (Paystack).
   try {
     const result = await subscriptionService.initializeSubscription({
       restaurantId,

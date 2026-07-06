@@ -1,22 +1,23 @@
 /**
- * Stripe Webhook Handler (United States market)
+ * Stripe Webhook Handler (United States market) — recurring subscriptions.
  *
- * Receives Stripe webhook events, verifies the signature with the signing
- * secret, logs the event (idempotent), and processes payment outcomes:
- *   - `checkout.session.completed` → activate the matching subscription
- *     (by the Checkout Session id, which we persist as paymentReference), or
- *     update an order's payment status when the session carries an orderId.
- *
- * Mirrors the Paystack webhook's posture: raw-body signature verification,
- * insert-first idempotency, and never trusts an unverified payload.
+ * Verifies the signature with the signing secret, logs each event idempotently
+ * (keyed by the Stripe event id), and drives the recurring subscription
+ * lifecycle:
+ *   - `checkout.session.completed` (mode=subscription) → link the Stripe
+ *     subscription + customer to our record and activate it.
+ *   - `invoice.paid` → renewal: extend the period and set active, record invoice.
+ *   - `invoice.payment_failed` → set past_due, record a failed invoice.
+ *   - `customer.subscription.deleted` → cancel our subscription.
  *
  * Env: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type Stripe from "stripe";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
-import { StripeProvider } from "@/lib/payment/StripeProvider";
+import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("webhook-stripe");
@@ -30,50 +31,73 @@ function getConvexClient(): ConvexHttpClient | null {
   return new ConvexHttpClient(convexUrl);
 }
 
-function getStripeProvider(): StripeProvider | null {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    logger.error("STRIPE_SECRET_KEY is not set");
-    return null;
+/**
+ * Extracts the Stripe subscription id from an invoice across SDK/API versions.
+ * Older APIs expose `invoice.subscription`; newer ones move it to
+ * `invoice.parent.subscription_details.subscription` or the line item.
+ */
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
+  const inv = invoice as unknown as {
+    subscription?: string | { id?: string } | null;
+    parent?: { subscription_details?: { subscription?: string | null } | null } | null;
+    lines?: {
+      data?: Array<{
+        subscription?: string | null;
+        parent?: { subscription_item_details?: { subscription?: string | null } | null } | null;
+      }>;
+    };
+  };
+  if (typeof inv.subscription === "string") return inv.subscription;
+  if (inv.subscription && typeof inv.subscription === "object" && inv.subscription.id) {
+    return inv.subscription.id;
   }
-  return new StripeProvider({
-    secretKey,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-  });
+  const parentSub = inv.parent?.subscription_details?.subscription;
+  if (typeof parentSub === "string") return parentSub;
+  const line = inv.lines?.data?.[0];
+  if (line && typeof line.subscription === "string") return line.subscription;
+  const lineParentSub = line?.parent?.subscription_item_details?.subscription;
+  if (typeof lineParentSub === "string") return lineParentSub;
+  return undefined;
+}
+
+/** Reads the recurring period end (ms) from an invoice's first line, if present. */
+function invoicePeriod(invoice: Stripe.Invoice): { start: number; end: number } | null {
+  const line = invoice.lines?.data?.[0];
+  if (line?.period?.start && line?.period?.end) {
+    return { start: line.period.start * 1000, end: line.period.end * 1000 };
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get("stripe-signature") || "";
 
-  const stripe = getStripeProvider();
+  const stripe = createStripeProvider();
   const convexClient = getConvexClient();
-  if (!stripe || !convexClient) {
+  if (!convexClient) {
     return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
   }
 
-  // Verify + parse the event via the provider (uses the signing secret).
-  const result = await stripe.handleWebhook(rawBody, signature);
-
-  if (!result.valid) {
-    logger.warn("Stripe webhook: invalid signature");
+  const event = stripe.constructEvent(rawBody, signature);
+  if (!event) {
+    logger.warn("Stripe webhook: invalid signature or missing secret");
     return NextResponse.json({ error: "Invalid webhook signature" }, { status: 422 });
   }
 
-  // Idempotency: the Checkout Session id + event type make a stable key.
-  const eventId = `stripe_${result.event}_${result.reference ?? "unknown"}`;
+  // Idempotency: Stripe event ids are globally unique.
+  const eventId = `stripe_${event.id}`;
   try {
     const insertResult = await convexClient.mutation(
       api.webhookEvents.atomicInsertWebhookEvent,
       {
         eventId,
         provider: "stripe",
-        eventType: result.event,
+        eventType: event.type,
         payload: rawBody,
         signature: signature || undefined,
         verified: true,
         processed: false,
-        orderId: result.orderId,
       }
     );
     if (!insertResult.inserted) {
@@ -81,39 +105,105 @@ export async function POST(request: NextRequest) {
     }
   } catch {
     logger.error("Stripe webhook: failed to log event", { eventId });
-    // Continue processing even if logging fails.
   }
 
   try {
-    if (result.event === "checkout.session.completed" && result.status === "paid") {
-      // Prefer activating the subscription by its stored paymentReference
-      // (the Checkout Session id).
-      if (result.reference) {
-        const sub = await convexClient.query(
-          api.subscriptions.getSubscriptionByPaymentReference,
-          { paymentReference: result.reference }
-        );
-        if (sub) {
-          await convexClient.mutation(api.subscriptions.activateSubscription, {
-            paymentReference: result.reference,
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.mode !== "subscription") break;
+        const ourSubscriptionId = session.metadata?.subscriptionId;
+        const stripeSubscriptionId =
+          typeof session.subscription === "string" ? session.subscription : undefined;
+        if (ourSubscriptionId && stripeSubscriptionId) {
+          await convexClient.mutation(api.subscriptions.linkStripeSubscription, {
+            subscriptionId: ourSubscriptionId,
+            stripeSubscriptionId,
+            stripeCustomerId:
+              typeof session.customer === "string" ? session.customer : undefined,
           });
-          logger.info("Stripe webhook: subscription activated", { eventId });
-        } else if (result.orderId) {
-          // Fall back to an order payment when this session is for an order.
-          const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
-            orderId: result.orderId,
-          });
-          if (order) {
-            await convexClient.mutation(api.orders.updatePaymentStatus, {
-              orderId: result.orderId,
-              restaurantId: order.restaurantId,
-              paymentStatus: "paid",
-              paymentReference: result.reference,
-              paymentTimestamp: Date.now(),
-            });
-          }
+          logger.info("Stripe webhook: subscription linked + activated", { eventId });
         }
+        break;
       }
+
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const stripeSubscriptionId = invoiceSubscriptionId(invoice);
+        if (!stripeSubscriptionId) break;
+        const sub = await convexClient.query(
+          api.subscriptions.getSubscriptionByStripeSubscriptionId,
+          { stripeSubscriptionId }
+        );
+        if (!sub) break;
+        const period = invoicePeriod(invoice);
+        const now = Date.now();
+        await convexClient.mutation(api.subscriptions.updateSubscriptionStatus, {
+          subscriptionId: sub.subscriptionId,
+          status: "active",
+          paymentReference: invoice.id ?? undefined,
+          failedPaymentCount: 0,
+          lastPaymentAttempt: now,
+          ...(period && {
+            currentPeriodStart: period.start,
+            currentPeriodEnd: period.end,
+          }),
+        });
+        await convexClient.mutation(api.subscriptions.createInvoice, {
+          invoiceId: `inv_${invoice.id}`,
+          subscriptionId: sub.subscriptionId,
+          restaurantId: sub.restaurantId,
+          amount: (invoice.amount_paid ?? 0) / 100,
+          currency: (invoice.currency ?? "usd").toUpperCase(),
+          status: "paid",
+          paymentProvider: "stripe",
+          paymentReference: invoice.id ?? undefined,
+          periodStart: period?.start ?? sub.currentPeriodStart,
+          periodEnd: period?.end ?? sub.currentPeriodEnd,
+          description: `Stripe subscription payment — ${sub.billingCycle} billing`,
+        });
+        logger.info("Stripe webhook: subscription renewed", { eventId });
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const stripeSubscriptionId = invoiceSubscriptionId(invoice);
+        if (!stripeSubscriptionId) break;
+        const sub = await convexClient.query(
+          api.subscriptions.getSubscriptionByStripeSubscriptionId,
+          { stripeSubscriptionId }
+        );
+        if (!sub) break;
+        await convexClient.mutation(api.subscriptions.updateSubscriptionStatus, {
+          subscriptionId: sub.subscriptionId,
+          status: "past_due",
+          lastPaymentAttempt: Date.now(),
+          lastPaymentError: "Stripe invoice payment failed",
+          failedPaymentCount: (sub.failedPaymentCount ?? 0) + 1,
+        });
+        logger.warn("Stripe webhook: subscription past_due", { eventId });
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const stripeSub = event.data.object as Stripe.Subscription;
+        const sub = await convexClient.query(
+          api.subscriptions.getSubscriptionByStripeSubscriptionId,
+          { stripeSubscriptionId: stripeSub.id }
+        );
+        if (!sub) break;
+        await convexClient.mutation(api.subscriptions.cancelSubscription, {
+          subscriptionId: sub.subscriptionId,
+          cancelImmediately: true,
+          reason: "Stripe subscription deleted",
+        });
+        logger.info("Stripe webhook: subscription cancelled", { eventId });
+        break;
+      }
+
+      default:
+        logger.info(`Stripe webhook: unhandled event ${event.type}`, { eventId });
     }
 
     await convexClient.mutation(api.webhookEvents.markWebhookEventAsProcessed, {

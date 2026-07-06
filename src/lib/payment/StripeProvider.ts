@@ -127,6 +127,78 @@ export class StripeProvider implements PaymentProvider {
     }
   }
 
+  /**
+   * Create a RECURRING subscription-mode Checkout Session (Stripe Billing).
+   * Uses inline `price_data` with a recurring interval so no pre-provisioned
+   * Price objects are needed. `referenceId` (our subscription id) is attached to
+   * both the session and the Stripe Subscription metadata for correlation.
+   */
+  async createSubscriptionCheckout(params: {
+    planName: string;
+    /** Amount in the smallest currency unit (cents). */
+    amountMinor: number;
+    /** ISO currency, e.g. "usd". */
+    currency: string;
+    interval: "month" | "year";
+    referenceId: string;
+    customerEmail?: string;
+  }): Promise<PaymentInitResult> {
+    try {
+      const session = await this.stripe.checkout.sessions.create({
+        mode: "subscription",
+        customer_email: params.customerEmail,
+        line_items: [
+          {
+            price_data: {
+              currency: params.currency,
+              product_data: { name: params.planName },
+              unit_amount: params.amountMinor,
+              recurring: { interval: params.interval },
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: { subscriptionId: params.referenceId },
+        subscription_data: {
+          metadata: { subscriptionId: params.referenceId },
+        },
+        success_url: this.callbackUrl
+          ? `${this.callbackUrl}?session_id={CHECKOUT_SESSION_ID}`
+          : "https://app.dinee.com/billing/verify?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: this.callbackUrl ?? "https://app.dinee.com/billing",
+      });
+      if (!session.url) {
+        return {
+          success: false,
+          reference: session.id,
+          error: "Stripe did not return a checkout URL",
+        };
+      }
+      return { success: true, reference: session.id, paymentUrl: session.url };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown Stripe error";
+      return { success: false, reference: "", error: message };
+    }
+  }
+
+  /**
+   * Verify + parse a raw webhook into a typed Stripe.Event using the signing
+   * secret. Returns null when the secret is missing or verification fails.
+   */
+  constructEvent(rawBody: string, signature: string): Stripe.Event | null {
+    if (!this.webhookSecret) return null;
+    try {
+      return this.stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        this.webhookSecret
+      );
+    } catch {
+      return null;
+    }
+  }
+
   /** Verify a checkout session by its id (the reference). */
   async verifyTransaction(reference: string): Promise<PaymentVerifyResult> {
     try {
