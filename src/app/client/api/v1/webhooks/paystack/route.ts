@@ -17,6 +17,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { PaystackProvider } from "@/lib/payment/PaystackProvider";
 import { createLogger } from "@/lib/logger";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 const logger = createLogger("webhook-paystack");
 
@@ -499,7 +500,7 @@ async function handleSubscriptionWebhook(
   // Look up the subscription in Convex
   const subscription = await convexClient.query(
     api.subscriptions.getSubscription,
-    { subscriptionId }
+    { subscriptionId, ...internalSecretArg() }
   );
 
   if (!subscription) {
@@ -534,6 +535,7 @@ async function handleSubscriptionWebhook(
         currentPeriodEnd: newPeriodEnd,
         failedPaymentCount: 0,
         lastPaymentAttempt: now,
+        ...internalSecretArg(),
       });
 
       // Create a paid invoice record
@@ -549,6 +551,7 @@ async function handleSubscriptionWebhook(
         periodStart: newPeriodStart,
         periodEnd: newPeriodEnd,
         description: `Subscription payment — ${subscription.billingCycle} billing`,
+        ...internalSecretArg(),
       });
 
       logger.info(
@@ -566,6 +569,7 @@ async function handleSubscriptionWebhook(
         lastPaymentAttempt: now,
         lastPaymentError: payload.data.gateway_response || "Payment failed",
         failedPaymentCount: (subscription.failedPaymentCount ?? 0) + 1,
+        ...internalSecretArg(),
       });
 
       // Create a failed invoice record
@@ -581,6 +585,7 @@ async function handleSubscriptionWebhook(
         periodStart: subscription.currentPeriodStart,
         periodEnd: subscription.currentPeriodEnd,
         description: `Failed payment — ${payload.data.gateway_response || "Payment failed"}`,
+        ...internalSecretArg(),
       });
 
       logger.warn(
@@ -599,6 +604,7 @@ async function handleSubscriptionWebhook(
       await convexClient.mutation(api.subscriptions.cancelSubscription, {
         subscriptionId,
         cancelImmediately: true,
+        ...internalSecretArg(),
       });
 
       // Create a failed invoice record to log the cancellation event
@@ -614,6 +620,7 @@ async function handleSubscriptionWebhook(
         periodStart: subscription.currentPeriodStart,
         periodEnd: subscription.currentPeriodEnd,
         description: "Subscription disabled by Paystack",
+        ...internalSecretArg(),
       });
 
       logger.info(

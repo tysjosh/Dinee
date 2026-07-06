@@ -11,6 +11,12 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { requireTenantAccess, requirePlatformAdmin } from "./shared/ownership";
+import { assertInternalCaller } from "./shared/internalAuth";
+
+// Server-to-server billing functions (payment verify + provider webhooks) run
+// without a Convex Auth session, so they authenticate with the forwarded
+// INTERNAL_API_KEY secret (see convex/shared/internalAuth.ts). Session
+// (dashboard) reads are scoped by tenant ownership instead.
 
 // ============================================================================
 // Subscription Status and Billing Cycle Validators
@@ -52,8 +58,11 @@ const invoiceStatusValidator = v.union(
 export const getSubscription = query({
   args: {
     subscriptionId: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Server-to-server (payment provider webhook) lookup.
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -71,6 +80,7 @@ export const getSubscriptionByRestaurant = query({
     restaurantId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccess(ctx, args.restaurantId);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -88,6 +98,7 @@ export const getSubscriptionsByStatus = query({
     status: subscriptionStatusValidator,
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const subscriptions = await ctx.db
       .query("subscriptions")
       .withIndex("by_status", (q) => q.eq("status", args.status))
@@ -116,12 +127,18 @@ export const getAllSubscriptions = query({
 export const getSubscriptionByPaymentReference = query({
   args: {
     paymentReference: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    // No dedicated index on paymentReference, so scan all and filter.
-    // This is acceptable because the table is small (one subscription per restaurant).
-    const allSubs = await ctx.db.query("subscriptions").collect();
-    return allSubs.find((sub) => sub.paymentReference === args.paymentReference) ?? null;
+    // Server-to-server (payment verify callback) lookup.
+    assertInternalCaller(args.internalSecret);
+    // Index-backed lookup on paymentReference (was a full-table scan).
+    return await ctx.db
+      .query("subscriptions")
+      .withIndex("by_payment_reference", (q) =>
+        q.eq("paymentReference", args.paymentReference)
+      )
+      .first();
   },
 });
 
@@ -135,6 +152,7 @@ export const getInvoicesByRestaurant = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccess(ctx, args.restaurantId);
     const limit = args.limit ?? 50;
     
     const invoices = await ctx.db
@@ -156,6 +174,7 @@ export const getInvoicesBySubscription = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const limit = args.limit ?? 50;
     
     const invoices = await ctx.db
@@ -176,6 +195,7 @@ export const getInvoice = query({
     invoiceId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const invoice = await ctx.db
       .query("subscriptionInvoices")
       .withIndex("by_invoice_id", (q) => q.eq("invoiceId", args.invoiceId))
@@ -194,6 +214,7 @@ export const getExpiringSubscriptions = query({
     daysUntilExpiry: v.number(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const now = Date.now();
     const expiryThreshold = now + (args.daysUntilExpiry * 24 * 60 * 60 * 1000);
     
@@ -352,11 +373,18 @@ export const startTrialSubscription = mutation({
 export const activateSubscription = mutation({
   args: {
     paymentReference: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Called by the payment verify callback (server-to-server) after the
+    // provider confirms payment. Requiring the internal secret prevents a
+    // client from self-activating a pending (unpaid) subscription.
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
-      .filter((q) => q.eq(q.field("paymentReference"), args.paymentReference))
+      .withIndex("by_payment_reference", (q) =>
+        q.eq("paymentReference", args.paymentReference)
+      )
       .first();
 
     if (!subscription) {
@@ -397,8 +425,10 @@ export const activateSubscription = mutation({
  * Stripe webhook to correlate `invoice.*` / `customer.subscription.*` events.
  */
 export const getSubscriptionByStripeSubscriptionId = query({
-  args: { stripeSubscriptionId: v.string() },
+  args: { stripeSubscriptionId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    // Server-to-server (Stripe webhook) lookup.
+    assertInternalCaller(args.internalSecret);
     return await ctx.db
       .query("subscriptions")
       .withIndex("by_stripe_subscription_id", (q) =>
@@ -419,8 +449,10 @@ export const linkStripeSubscription = mutation({
     stripeCustomerId: v.optional(v.string()),
     currentPeriodStart: v.optional(v.number()),
     currentPeriodEnd: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) =>
@@ -461,8 +493,10 @@ export const updateSubscriptionStatus = mutation({
     lastPaymentError: v.optional(v.string()),
     currentPeriodStart: v.optional(v.number()),
     currentPeriodEnd: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -509,8 +543,12 @@ export const cancelSubscription = mutation({
     subscriptionId: v.string(),
     cancelImmediately: v.optional(v.boolean()),
     reason: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Provider webhooks (subscription disabled/cancelled) call this
+    // server-to-server. Dashboard cancellation uses setCancelAtPeriodEnd.
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -550,8 +588,10 @@ export const changePlan = mutation({
     subscriptionId: v.string(),
     newPlanId: v.string(),
     effectiveImmediately: v.optional(v.boolean()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -582,8 +622,10 @@ export const renewSubscription = mutation({
     newPeriodStart: v.number(),
     newPeriodEnd: v.number(),
     paymentReference: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -627,8 +669,10 @@ export const createInvoice = mutation({
     periodStart: v.number(),
     periodEnd: v.number(),
     description: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const now = Date.now();
     
     const invoiceId = await ctx.db.insert("subscriptionInvoices", {
@@ -659,8 +703,10 @@ export const updateInvoiceStatus = mutation({
     status: invoiceStatusValidator,
     paymentReference: v.optional(v.string()),
     paidAt: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const invoice = await ctx.db
       .query("subscriptionInvoices")
       .withIndex("by_invoice_id", (q) => q.eq("invoiceId", args.invoiceId))
@@ -702,8 +748,10 @@ export const recordPaymentFailure = mutation({
     subscriptionId: v.string(),
     errorMessage: v.string(),
     amount: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -750,6 +798,7 @@ export const getSubscriptionsWithFailedPayments = query({
     maxRetries: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const maxRetries = args.maxRetries ?? 3;
     
     // Get all past_due subscriptions
@@ -777,6 +826,7 @@ export const getSubscriptionsNeedingDowngrade = query({
     maxRetries: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const maxRetries = args.maxRetries ?? 3;
     
     // Get all past_due subscriptions
@@ -804,8 +854,10 @@ export const downgradeSubscription = mutation({
     subscriptionId: v.string(),
     newPlanId: v.string(),
     reason: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -851,8 +903,10 @@ export const resetPaymentFailures = mutation({
   args: {
     subscriptionId: v.string(),
     paymentReference: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const subscription = await ctx.db
       .query("subscriptions")
       .withIndex("by_subscription_id", (q) => q.eq("subscriptionId", args.subscriptionId))
@@ -889,6 +943,7 @@ export const getPaymentFailureHistory = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const limit = args.limit ?? 10;
     
     // Get failed invoices for this subscription
@@ -922,6 +977,7 @@ export const getSubscriptionUsage = query({
     periodEnd: v.number(),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccess(ctx, args.restaurantId);
     // Get branch count
     const branches = await ctx.db
       .query("branches")

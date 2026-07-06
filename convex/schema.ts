@@ -651,6 +651,7 @@ export default defineSchema({
     .index("by_subscription_id", ["subscriptionId"])
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_status", ["status"])
+    .index("by_payment_reference", ["paymentReference"])
     .index("by_stripe_subscription_id", ["stripeSubscriptionId"]),
 
   // Subscription Invoices (billing history)

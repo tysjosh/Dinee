@@ -17,6 +17,7 @@ import { createFlutterwaveProvider } from "@/lib/payment/FlutterwaveProvider";
 import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import type { PaymentProvider } from "@/lib/payment/types";
 import { createLogger } from "@/lib/logger";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 const logger = createLogger("billing-verify");
 
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     // for Stripe subscriptions, so it round-trips through this lookup.
     const subscription = await convexClient.query(
       api.subscriptions.getSubscriptionByPaymentReference,
-      { paymentReference: reference },
+      { paymentReference: reference, ...internalSecretArg() },
     );
 
     let provider: PaymentProvider;
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
     // Payment confirmed — activate the subscription
     await convexClient.mutation(api.subscriptions.activateSubscription, {
       paymentReference: reference,
+      ...internalSecretArg(),
     });
 
     logger.info("Subscription activated after payment verification", { reference });

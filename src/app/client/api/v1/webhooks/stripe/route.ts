@@ -19,6 +19,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import { createLogger } from "@/lib/logger";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 const logger = createLogger("webhook-stripe");
 
@@ -121,6 +122,7 @@ export async function POST(request: NextRequest) {
             stripeSubscriptionId,
             stripeCustomerId:
               typeof session.customer === "string" ? session.customer : undefined,
+            ...internalSecretArg(),
           });
           logger.info("Stripe webhook: subscription linked + activated", { eventId });
         }
@@ -133,7 +135,7 @@ export async function POST(request: NextRequest) {
         if (!stripeSubscriptionId) break;
         const sub = await convexClient.query(
           api.subscriptions.getSubscriptionByStripeSubscriptionId,
-          { stripeSubscriptionId }
+          { stripeSubscriptionId, ...internalSecretArg() }
         );
         if (!sub) break;
         const period = invoicePeriod(invoice);
@@ -148,6 +150,7 @@ export async function POST(request: NextRequest) {
             currentPeriodStart: period.start,
             currentPeriodEnd: period.end,
           }),
+          ...internalSecretArg(),
         });
         await convexClient.mutation(api.subscriptions.createInvoice, {
           invoiceId: `inv_${invoice.id}`,
@@ -161,6 +164,7 @@ export async function POST(request: NextRequest) {
           periodStart: period?.start ?? sub.currentPeriodStart,
           periodEnd: period?.end ?? sub.currentPeriodEnd,
           description: `Stripe subscription payment — ${sub.billingCycle} billing`,
+          ...internalSecretArg(),
         });
         logger.info("Stripe webhook: subscription renewed", { eventId });
         break;
@@ -172,7 +176,7 @@ export async function POST(request: NextRequest) {
         if (!stripeSubscriptionId) break;
         const sub = await convexClient.query(
           api.subscriptions.getSubscriptionByStripeSubscriptionId,
-          { stripeSubscriptionId }
+          { stripeSubscriptionId, ...internalSecretArg() }
         );
         if (!sub) break;
         await convexClient.mutation(api.subscriptions.updateSubscriptionStatus, {
@@ -181,6 +185,7 @@ export async function POST(request: NextRequest) {
           lastPaymentAttempt: Date.now(),
           lastPaymentError: "Stripe invoice payment failed",
           failedPaymentCount: (sub.failedPaymentCount ?? 0) + 1,
+          ...internalSecretArg(),
         });
         logger.warn("Stripe webhook: subscription past_due", { eventId });
         break;
@@ -190,13 +195,14 @@ export async function POST(request: NextRequest) {
         const stripeSub = event.data.object as Stripe.Subscription;
         const sub = await convexClient.query(
           api.subscriptions.getSubscriptionByStripeSubscriptionId,
-          { stripeSubscriptionId: stripeSub.id }
+          { stripeSubscriptionId: stripeSub.id, ...internalSecretArg() }
         );
         if (!sub) break;
         await convexClient.mutation(api.subscriptions.cancelSubscription, {
           subscriptionId: sub.subscriptionId,
           cancelImmediately: true,
           reason: "Stripe subscription deleted",
+          ...internalSecretArg(),
         });
         logger.info("Stripe webhook: subscription cancelled", { eventId });
         break;
