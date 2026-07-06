@@ -1,5 +1,14 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { assertInternalCaller } from "./shared/internalAuth";
+
+/**
+ * SECURITY: every function here is called ONLY by the Next Runsheet webhook
+ * route (server-to-server). They are public Convex exports, so — like
+ * `convex/internal.ts` — they each require the forwarded internal secret
+ * (INTERNAL_API_KEY). Without it a direct Convex call is rejected. This matters
+ * especially for `getBusinessWebhookSecret`, which returns a signing secret.
+ */
 
 /**
  * Check if a webhook event has already been processed (deduplication).
@@ -11,8 +20,10 @@ export const checkDeduplication = query({
   args: {
     eventId: v.string(),
     provider: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     return await ctx.db
       .query("webhookDeduplication")
       .withIndex("by_event_and_provider", (q) =>
@@ -30,8 +41,10 @@ export const checkDeduplication = query({
 export const getBusinessWebhookSecret = query({
   args: {
     businessId: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const business = await ctx.db
       .query("restaurants")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.businessId))
@@ -56,8 +69,10 @@ export const recordDeduplication = mutation({
   args: {
     eventId: v.string(),
     provider: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
@@ -84,8 +99,10 @@ export const updateShipmentFromWebhook = mutation({
     eventId: v.string(),
     eventType: v.string(),
     payload: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const shipment = await ctx.db
       .query("shipments")
       .withIndex("by_shipment_id", (q) => q.eq("shipmentId", args.shipmentId))
@@ -129,8 +146,10 @@ export const updateRiderFromWebhook = mutation({
     riderId: v.string(),
     eventId: v.string(),
     payload: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const shipment = await ctx.db
       .query("shipments")
       .withIndex("by_shipment_id", (q) => q.eq("shipmentId", args.shipmentId))
@@ -170,8 +189,10 @@ export const updateRiderFromWebhook = mutation({
 export const incrementRunsheetFailureCount = mutation({
   args: {
     businessId: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const business = await ctx.db
       .query("restaurants")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.businessId))

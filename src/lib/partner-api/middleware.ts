@@ -25,6 +25,7 @@ import {
   createRateLimitResponse,
 } from './rate-limiter';
 import type { ApiKey, ApiKeyScope, ApiRequestContext, ApiErrorResponse } from './types';
+import { internalSecretArg } from '@/lib/internal-auth';
 import crypto from 'crypto';
 
 // Re-export authorizeResourceAccess so route handlers can import from middleware
@@ -179,7 +180,7 @@ export async function validateApiRequest(
   
   let dbApiKey;
   try {
-    dbApiKey = await convexClient.query(api.apiKeys.getApiKeyByHash, { keyHash });
+    dbApiKey = await convexClient.query(api.apiKeys.getApiKeyByHash, { keyHash, ...internalSecretArg() });
   } catch (error) {
     console.error('Error fetching API key:', error);
     return {
@@ -280,7 +281,7 @@ export async function validateApiRequest(
   
   // Update last used timestamp (fire and forget)
   try {
-    convexClient.mutation(api.apiKeys.updateApiKeyLastUsed, { keyId: apiKey.id });
+    convexClient.mutation(api.apiKeys.updateApiKeyLastUsed, { keyId: apiKey.id, ...internalSecretArg() });
   } catch {
     // Ignore errors updating last used
   }

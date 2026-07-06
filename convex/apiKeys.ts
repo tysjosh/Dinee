@@ -1,11 +1,23 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { assertInternalCaller } from "./shared/internalAuth";
+import { requirePlatformAdmin } from "./shared/ownership";
 
 /**
  * API Keys CRUD Operations
- * 
+ *
  * This module provides functions for managing API keys for partner applications.
- * 
+ *
+ * SECURITY: these functions gate the partner-API auth backbone (key hashes,
+ * scopes). They are NOT tenant-scoped session calls, so:
+ *  - the two used by the partner-API middleware at request time
+ *    (`getApiKeyByHash`, `updateApiKeyLastUsed`) require the forwarded internal
+ *    secret (INTERNAL_API_KEY), matching the server-to-server pattern in
+ *    `convex/internal.ts`; a raw Convex call without the secret is rejected.
+ *  - the management/read functions require a platform-admin session.
+ * Previously all of these were public and unauthenticated, which exposed key
+ * hashes and allowed anyone to mint/revoke partner keys.
+ *
  * @requirements 21.3 - API key management for partners in the dashboard
  */
 
@@ -21,6 +33,7 @@ export const getApiKeyByKeyId = query({
     keyId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_id", (q) => q.eq("keyId", args.keyId))
@@ -30,13 +43,16 @@ export const getApiKeyByKeyId = query({
 });
 
 /**
- * Get an API key by its hash (for validation)
+ * Get an API key by its hash (for validation). Called by the partner-API
+ * middleware at request time (server-to-server) — requires the internal secret.
  */
 export const getApiKeyByHash = query({
   args: {
     keyHash: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_hash", (q) => q.eq("keyHash", args.keyHash))
@@ -53,6 +69,7 @@ export const getApiKeysByPartnerId = query({
     partnerId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKeys = await ctx.db
       .query("apiKeys")
       .withIndex("by_partner_id", (q) => q.eq("partnerId", args.partnerId))
@@ -69,6 +86,7 @@ export const getActiveApiKeysByPartnerId = query({
     partnerId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKeys = await ctx.db
       .query("apiKeys")
       .withIndex("by_partner_id", (q) => q.eq("partnerId", args.partnerId))
@@ -78,22 +96,24 @@ export const getActiveApiKeysByPartnerId = query({
 });
 
 /**
- * Get all API keys (for validation purposes)
+ * Get all API keys (admin panel).
  */
 export const getAllApiKeys = query({
   args: {},
   handler: async (ctx) => {
+    await requirePlatformAdmin(ctx);
     const apiKeys = await ctx.db.query("apiKeys").collect();
     return apiKeys;
   },
 });
 
 /**
- * Get all active API keys (for validation purposes)
+ * Get all active API keys (admin panel).
  */
 export const getAllActiveApiKeys = query({
   args: {},
   handler: async (ctx) => {
+    await requirePlatformAdmin(ctx);
     const apiKeys = await ctx.db.query("apiKeys").collect();
     return apiKeys.filter((k) => k.status === "active");
   },
@@ -119,6 +139,7 @@ export const createApiKey = mutation({
     ipWhitelist: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const id = await ctx.db.insert("apiKeys", {
       keyId: args.keyId,
       keyHash: args.keyHash,
@@ -150,6 +171,7 @@ export const updateApiKey = mutation({
     ipWhitelist: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_id", (q) => q.eq("keyId", args.keyId))
@@ -177,8 +199,11 @@ export const updateApiKey = mutation({
 export const updateApiKeyLastUsed = mutation({
   args: {
     keyId: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Called by the partner-API middleware (server-to-server) on each request.
+    assertInternalCaller(args.internalSecret);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_id", (q) => q.eq("keyId", args.keyId))
@@ -201,6 +226,7 @@ export const revokeApiKey = mutation({
     keyId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_id", (q) => q.eq("keyId", args.keyId))
@@ -223,6 +249,7 @@ export const deleteApiKey = mutation({
     keyId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const apiKey = await ctx.db
       .query("apiKeys")
       .withIndex("by_key_id", (q) => q.eq("keyId", args.keyId))

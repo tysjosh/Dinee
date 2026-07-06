@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../../convex/_generated/api";
 import { validateRunsheetSignature } from "@/lib/integrations/runsheetClient";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 // ============================================================================
 // Types
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       try {
         webhookSecret = await convexClientForSecret.query(
           api.runsheetWebhook.getBusinessWebhookSecret,
-          { businessId }
+          { businessId, ...internalSecretArg() }
         );
       } catch (err) {
         console.error("[runsheet-webhook] Failed to fetch per-business secret:", err);
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const existing = await convexClient.query(
       api.runsheetWebhook.checkDeduplication,
-      { eventId: body.eventId, provider: "runsheet" }
+      { eventId: body.eventId, provider: "runsheet", ...internalSecretArg() }
     );
 
     if (existing) {
@@ -208,6 +209,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           eventId: body.eventId,
           eventType: "shipment_status",
           payload: JSON.stringify(body.payload),
+          ...internalSecretArg(),
         }
       );
     } else {
@@ -227,6 +229,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           riderId,
           eventId: body.eventId,
           payload: JSON.stringify(body.payload),
+          ...internalSecretArg(),
         }
       );
     }
@@ -239,14 +242,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (businessId) {
         await convexClient.mutation(
           api.runsheetWebhook.incrementRunsheetFailureCount,
-          { businessId }
+          { businessId, ...internalSecretArg() }
         );
       }
 
       // Record deduplication even for unmatched — prevents reprocessing
       await convexClient.mutation(
         api.runsheetWebhook.recordDeduplication,
-        { eventId: body.eventId, provider: "runsheet" }
+        { eventId: body.eventId, provider: "runsheet", ...internalSecretArg() }
       );
 
       return NextResponse.json(
@@ -258,7 +261,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 9. Record deduplication entry (Req 8.7)
     await convexClient.mutation(
       api.runsheetWebhook.recordDeduplication,
-      { eventId: body.eventId, provider: "runsheet" }
+      { eventId: body.eventId, provider: "runsheet", ...internalSecretArg() }
     );
 
     return NextResponse.json(
