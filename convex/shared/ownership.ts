@@ -74,3 +74,72 @@ export async function requireTenantAccess(
   if (user.tenantId && user.tenantId === restaurantId) return user;
   throw new Error("Forbidden: you do not have access to this resource");
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Mixed-context guards (session OR trusted server-to-server caller)
+//
+// Some restaurant functions are called from BOTH the session-authenticated
+// dashboard AND server routes that authenticate by other means (partner API
+// key, the internal x-api-key, or the module guard) using a ConvexHttpClient
+// with no Convex Auth session. Those trusted server callers forward the shared
+// INTERNAL_API_KEY secret (see `convex/shared/internalAuth.ts` /
+// `src/lib/internal-auth.ts#internalSecretArg`), which these guards accept in
+// lieu of a session — while still holding real browser clients to tenant
+// ownership.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Boolean form of the internal-caller check. Matches `assertInternalCaller`:
+ * when `INTERNAL_API_KEY` is not configured (local dev) it returns true so the
+ * dev workflow is unaffected; production deployments MUST set the key.
+ */
+export function hasValidInternalSecret(secret: string | undefined): boolean {
+  const expected = process.env.INTERNAL_API_KEY;
+  if (!expected) return true; // local dev bypass (mirrors assertInternalCaller)
+  return Boolean(secret) && secret === expected;
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from a session user with tenant access to `restaurantId`.
+ * Throws "Forbidden" otherwise.
+ */
+export async function requireTenantAccessOrInternal(
+  ctx: AnyCtx,
+  restaurantId: string,
+  internalSecret: string | undefined
+): Promise<void> {
+  if (hasValidInternalSecret(internalSecret)) return;
+  await requireTenantAccess(ctx, restaurantId);
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from any authenticated session user. Returns the session user
+ * record when present (server callers return null). Used for creation, where
+ * an onboarding user does not yet own a tenant.
+ */
+export async function requireUserOrInternal(
+  ctx: AnyCtx,
+  internalSecret: string | undefined
+): Promise<Doc<"users"> | null> {
+  if (hasValidInternalSecret(internalSecret)) {
+    // Trusted server caller — still return a session user if one happens to be
+    // attached (harmless), else null.
+    return await getCurrentUserRecord(ctx);
+  }
+  return await requireUser(ctx);
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from a platform admin session. Throws "Forbidden" otherwise. Used
+ * for platform-scoped reads invoked only by server routes today.
+ */
+export async function requirePlatformAdminOrInternal(
+  ctx: AnyCtx,
+  internalSecret: string | undefined
+): Promise<void> {
+  if (hasValidInternalSecret(internalSecret)) return;
+  await requirePlatformAdmin(ctx);
+}

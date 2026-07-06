@@ -14,6 +14,7 @@ import { api } from '../../../../../../../../convex/_generated/api';
 import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
+import { internalSecretArg } from '@/lib/internal-auth';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -91,6 +92,7 @@ export async function GET(
     // Get the restaurant
     const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
       restaurantId,
+      ...internalSecretArg(),
     });
     
     if (!restaurant) {

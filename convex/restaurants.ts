@@ -2,7 +2,13 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { verticalValidator } from "./shared/validators";
-import { requirePlatformAdmin } from "./shared/ownership";
+import {
+  requirePlatformAdmin,
+  requireTenantAccess,
+  requireTenantAccessOrInternal,
+  requirePlatformAdminOrInternal,
+  requireUserOrInternal,
+} from "./shared/ownership";
 
 // Generate a 5-digit numeric restaurant ID
 function generateRestaurantId(): string {
@@ -60,9 +66,14 @@ export const createRestaurant = mutation({
   },
 });
 
+// Read a single restaurant. Mixed-context: the dashboard (session) reads its
+// own tenant; server routes (billing checkout, partner API, module guard)
+// forward the internal secret. A raw browser client without either is denied.
 export const getRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+
     const restaurant = await ctx.db
       .query("restaurants")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -89,14 +100,18 @@ export const getAllRestaurants = query({
   },
 });
 
-// Get all restaurants for a specific platform
+// Get all restaurants for a specific platform. Invoked by the partner API
+// (server, forwards the internal secret); a session caller must be a platform
+// admin. Bounded to the newest 1000 as a safety net against unbounded reads.
 export const getRestaurantsByPlatform = query({
-  args: { platformId: v.string() },
+  args: { platformId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
+
     const restaurants = await ctx.db
       .query("restaurants")
       .withIndex("by_platform_id", (q) => q.eq("platformId", args.platformId))
-      .collect();
+      .take(1000);
 
     return restaurants;
   },
@@ -109,6 +124,8 @@ export const updateBranchCount = mutation({
     branchCount: v.number(),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccess(ctx, args.restaurantId);
+
     const restaurant = await ctx.db
       .query("restaurants")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -149,6 +166,8 @@ export const updateRestaurant = mutation({
     virtualNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccess(ctx, args.restaurantId);
+
     const restaurant = await ctx.db
       .query("restaurants")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -194,6 +213,10 @@ export const updateRestaurant = mutation({
 export const deleteRestaurantData = mutation({
   args: { restaurantId: v.string() },
   handler: async (ctx, args) => {
+    // Authorize before the try so a denial propagates as an error rather than
+    // being swallowed into a `false` return.
+    await requireTenantAccess(ctx, args.restaurantId);
+
     try {
       // Delete restaurant
       const restaurant = await ctx.db
@@ -313,8 +336,14 @@ export const createRestaurantWithBranches = mutation({
     country: v.optional(v.union(v.literal("NG"), v.literal("US"))),
     source_platform: v.optional(v.string()),
     source_tenant: v.optional(v.string()),
+    // Forwarded by trusted server callers (partner API) in lieu of a session.
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Mixed-context: an onboarding dashboard user (session, no tenant yet) or a
+    // trusted server caller (partner API, forwards the internal secret).
+    const sessionUser = await requireUserOrInternal(ctx, args.internalSecret);
+
     // Track created resources for potential rollback
     let restaurantDocId: Id<"restaurants"> | null = null;
     const createdBranchDocIds: Id<"branches">[] = [];
@@ -397,6 +426,15 @@ export const createRestaurantWithBranches = mutation({
       await ctx.db.patch(restaurantDocId, {
         branchCount: createdBranches.length,
       });
+
+      // Step 6: Atomically link an onboarding session user to the business they
+      // just created. This closes the window where the freshly-saved
+      // restaurantId would fail `getRestaurant`'s tenant-access check before the
+      // separate setCurrentUserTenant call lands. Only fills a MISSING tenantId
+      // (never reassigns an existing owner, and never for server callers).
+      if (sessionUser && !sessionUser.tenantId) {
+        await ctx.db.patch(sessionUser._id, { tenantId: restaurantId });
+      }
 
       // Return success with all created IDs
       return {

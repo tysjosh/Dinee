@@ -15,6 +15,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { validateApiRequest } from "@/lib/partner-api/middleware";
 import { logPartnerApiAudit } from "@/lib/partner-api/auditLogger";
+import { internalSecretArg } from "@/lib/internal-auth";
 import type { ApiErrorResponse } from "@/lib/partner-api/types";
 
 // ============================================================================
@@ -186,6 +187,7 @@ export async function POST(
         enabledModules: body.enabledModules,
         source_platform: body.source_platform,
         source_tenant: body.source_tenant,
+        ...internalSecretArg(),
       }
     );
 

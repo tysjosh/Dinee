@@ -21,6 +21,7 @@ import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import { createLogger } from "@/lib/logger";
 import type { BillingCycle, SubscriptionPaymentProvider } from "@/lib/billing/types";
 import { resolveSubscriptionProvider } from "@/lib/region";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 const logger = createLogger("billing-checkout");
 
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
   try {
     const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
       restaurantId,
+      ...internalSecretArg(),
     });
     const country = (restaurant as { country?: string } | null)?.country;
     const provider = resolveSubscriptionProvider(country, requestedProvider);

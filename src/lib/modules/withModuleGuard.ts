@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { resolveModule } from "./moduleResolver";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 /**
  * Wraps a Next.js route handler with module entitlement enforcement.
@@ -53,6 +54,7 @@ export function withModuleGuard(moduleId: string) {
       const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
       const business = await convex.query(api.restaurants.getRestaurant, {
         restaurantId: businessId,
+        ...internalSecretArg(),
       });
 
       // 4. Business not found → let the handler deal with it
