@@ -93,16 +93,50 @@ function clampOrderLimit(limit?: number): number {
 }
 
 // Get orders for a restaurant (newest first, bounded).
+//
+// When `startDate`/`endDate` (ms epoch, matched against `orderPlacementTime`)
+// are supplied, the read is scoped to that window via the
+// `by_restaurant_and_placement` index BEFORE the limit is applied — so the cap
+// bounds the requested date window rather than the global newest N. This is
+// what lets date-filtered history reads (e.g. the partner API) page through
+// older orders instead of silently missing anything outside the newest N.
+// Orders without an `orderPlacementTime` are excluded from date-scoped reads
+// (they cannot satisfy a date filter anyway).
 export const getOrdersByRestaurant = query({
-  args: { restaurantId: v.string(), limit: v.optional(v.number()) },
+  args: {
+    restaurantId: v.string(),
+    limit: v.optional(v.number()),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
-    const orders = await ctx.db
-      .query("orders")
-      .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
-      .order("desc")
-      .take(clampOrderLimit(args.limit));
+    const { restaurantId, startDate, endDate } = args;
+    const take = clampOrderLimit(args.limit);
 
-    return orders;
+    if (startDate !== undefined || endDate !== undefined) {
+      return await ctx.db
+        .query("orders")
+        .withIndex("by_restaurant_and_placement", (q) => {
+          const base = q.eq("restaurantId", restaurantId);
+          if (startDate !== undefined && endDate !== undefined) {
+            return base
+              .gte("orderPlacementTime", startDate)
+              .lte("orderPlacementTime", endDate);
+          }
+          if (startDate !== undefined) {
+            return base.gte("orderPlacementTime", startDate);
+          }
+          return base.lte("orderPlacementTime", endDate!);
+        })
+        .order("desc")
+        .take(take);
+    }
+
+    return await ctx.db
+      .query("orders")
+      .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", restaurantId))
+      .order("desc")
+      .take(take);
   },
 });
 

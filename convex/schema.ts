@@ -325,6 +325,9 @@ export default defineSchema({
     .index("by_order_id", ["orderId"])
     .index("by_payment_status", ["paymentStatus"])
     .index("by_delivery_status", ["deliveryStatus"])
+    // Date-scoped history reads (partner API): filter/sort by placement time
+    // within a restaurant without scanning the whole table.
+    .index("by_restaurant_and_placement", ["restaurantId", "orderPlacementTime"])
     .index("by_public_order_code_and_restaurant", ["publicOrderCode", "restaurantId"]),
 
   // Transcripts
