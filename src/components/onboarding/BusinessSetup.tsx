@@ -11,12 +11,13 @@ import BranchSetup, { BranchData } from "./BranchSetup";
 import type { Vertical } from "@/lib/modules/types";
 
 export interface BusinessSetupProps {
-  onComplete: (restaurantId: string) => void;
+  onComplete: (restaurantId: string, country: "NG" | "US") => void;
   vertical?: Vertical;
 }
 
 export interface FormData {
   name: string;
+  country: "NG" | "US";
   agentName: string;
   menuDetails: Array<{
     name: string;
@@ -150,6 +151,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<FormData>({
     name: "",
+    country: "NG",
     agentName: "",
     menuDetails: [],
     specialInstructions: "",
@@ -328,6 +330,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
     try {
       const result = await saveRestaurantData({
         name: formData.name,
+        country: formData.country,
         agentName: formData.agentName,
         menuDetails: formData.menuDetails,
         specialInstructions: formData.specialInstructions,
@@ -335,7 +338,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
         branches: formData.branches,
       });
 
-      onComplete(result?.restaurantId || "");
+      onComplete(result?.restaurantId || "", formData.country);
     } catch (error) {
       setErrors({
         general:
@@ -354,7 +357,46 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
     switch (currentStepId) {
       case "restaurant-name":
         return (
-          <div>
+          <div className="space-y-6">
+            <div>
+              <label
+                htmlFor="business-country"
+                className="block text-sm font-medium text-white/70 mb-3"
+              >
+                Country
+                <span className="text-red-400 ml-1" aria-label="required">
+                  *
+                </span>
+              </label>
+              <select
+                id="business-country"
+                value={formData.country}
+                onChange={(e) => {
+                  const country = e.target.value as "NG" | "US";
+                  setFormData((prev) => ({
+                    ...prev,
+                    country,
+                    // Reset Nigeria-only languages when switching to the US.
+                    languagePreference:
+                      country === "US" &&
+                      (prev.languagePreference === "nigerian_english" ||
+                        prev.languagePreference === "pidgin")
+                        ? "english"
+                        : prev.languagePreference,
+                  }));
+                }}
+                className="input-dark w-full px-4 py-3 rounded-lg"
+                disabled={isSubmitting}
+              >
+                <option value="NG">Nigeria (₦ NGN)</option>
+                <option value="US">United States ($ USD)</option>
+              </select>
+              <p className="mt-2 text-sm text-white/60">
+                Determines your currency, payment methods, and phone number
+                format.
+              </p>
+            </div>
+            <div>
             <label className="block text-sm font-medium text-white/70 mb-3">
               {entityLabel} Name
               <span className="text-red-400 ml-1" aria-label="required">
@@ -382,6 +424,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
                 {errors.name}
               </p>
             )}
+            </div>
           </div>
         );
 
@@ -685,7 +728,12 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
                 </span>
               </legend>
               <div className="space-y-3">
-                {LANGUAGE_OPTIONS.map((option) => (
+                {LANGUAGE_OPTIONS.filter(
+                  (option) =>
+                    formData.country !== "US" ||
+                    (option.value !== "nigerian_english" &&
+                      option.value !== "pidgin")
+                ).map((option) => (
                   <CustomRadio
                     key={option.value}
                     id={`language-${option.value}`}

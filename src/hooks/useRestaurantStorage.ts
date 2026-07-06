@@ -13,6 +13,8 @@ const RESTAURANT_ID_KEY = "restaurantId";
  */
 interface RestaurantDataWithBranches extends Omit<Restaurant, 'id'> {
   branches?: BranchData[];
+  /** Country/region for the tenant (NG | US). Defaults to NG server-side. */
+  country?: "NG" | "US";
 }
 
 /**
@@ -137,6 +139,7 @@ export function useRestaurantStorage() {
           specialInstructions: data.specialInstructions,
           languagePreference: data.languagePreference as 'english' | 'nigerian_english' | 'pidgin' | 'spanish' | 'french',
           platformId,
+          ...(data.country ? { country: data.country } : {}),
           branches: data.branches?.map(branch => ({
             name: branch.name,
             address: branch.address,

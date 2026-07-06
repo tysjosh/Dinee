@@ -304,6 +304,8 @@ export const createRestaurantWithBranches = mutation({
     virtualNumber: v.optional(v.string()),
     vertical: v.optional(verticalValidator),
     enabledModules: v.optional(v.array(v.string())),
+    // Country/region (NG | US); absent defaults to NG in app logic.
+    country: v.optional(v.union(v.literal("NG"), v.literal("US"))),
     source_platform: v.optional(v.string()),
     source_tenant: v.optional(v.string()),
   },
@@ -337,6 +339,7 @@ export const createRestaurantWithBranches = mutation({
         createdAt: Date.now(),
         ...(args.vertical !== undefined && { vertical: args.vertical }),
         ...(args.enabledModules !== undefined && { enabledModules: args.enabledModules }),
+        ...(args.country !== undefined && { country: args.country }),
       });
 
       // Step 3: Prepare branches to create

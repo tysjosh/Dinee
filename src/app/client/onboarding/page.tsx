@@ -50,6 +50,7 @@ export default function OnboardingPage() {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("business-type");
   const [generatedBusinessId, setGeneratedBusinessId] = useState("");
   const [selectedVertical, setSelectedVertical] = useState<Vertical | undefined>();
+  const [selectedCountry, setSelectedCountry] = useState<"NG" | "US">("NG");
   const [enabledModules, setEnabledModules] = useState<string[]>(["core_platform"]);
   const [runsheetConfig, setRunsheetConfig] = useState<RunsheetConfig | undefined>();
   const [planLoading, setPlanLoading] = useState(false);
@@ -77,8 +78,9 @@ export default function OnboardingPage() {
     setCurrentStep("business-setup");
   };
 
-  const handleBusinessSetup = async (businessId: string) => {
+  const handleBusinessSetup = async (businessId: string, country: "NG" | "US") => {
     setGeneratedBusinessId(businessId);
+    setSelectedCountry(country);
 
     // Link the authenticated user to the newly created business by setting
     // tenantId on their auth row (resolved server-side via getAuthUserId, so it
@@ -199,6 +201,7 @@ export default function OnboardingPage() {
       case "plan-selection":
         return (
           <PlanPicker
+            country={selectedCountry}
             onSelectPlan={handlePlanSelected}
             onSkip={handlePlanSkipped}
             isLoading={planLoading}

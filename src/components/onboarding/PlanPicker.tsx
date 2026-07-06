@@ -4,17 +4,19 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import {
   SUBSCRIPTION_PLANS,
-  formatNairaPrice,
-  calculateYearlySavings,
+  getPlanPrice,
   isUnlimited,
 } from "@/lib/billing/SubscriptionService";
 import type { SubscriptionPlan } from "@/lib/billing/types";
 import type { BillingCycle } from "@/lib/billing/types";
+import { formatMoney, getCurrencyForCountry } from "@/lib/region";
 
 export interface PlanPickerProps {
   onSelectPlan: (planId: string, billingCycle: BillingCycle) => void;
   onSkip: () => void;
   isLoading?: boolean;
+  /** Tenant country (NG | US) driving currency + pricing. Defaults to NG. */
+  country?: "NG" | "US";
 }
 
 function formatLimit(value: number): string {
@@ -36,17 +38,24 @@ const LIMIT_LABELS: { key: keyof SubscriptionPlan["limits"]; label: string; icon
  *
  * Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
  */
-const PlanPicker: React.FC<PlanPickerProps> = ({ onSelectPlan, onSkip, isLoading }) => {
+const PlanPicker: React.FC<PlanPickerProps> = ({ onSelectPlan, onSkip, isLoading, country }) => {
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
+
+  const currency = getCurrencyForCountry(country);
 
   const activePlans = SUBSCRIPTION_PLANS.filter((p) => p.isActive).sort(
     (a, b) => a.sortOrder - b.sortOrder
   );
 
+  // Monthly-equivalent price shown per card, in the tenant's currency.
   const displayPrice = (plan: SubscriptionPlan) =>
     billingCycle === "yearly"
-      ? formatNairaPrice(Math.round(plan.priceYearly / 12))
-      : formatNairaPrice(plan.priceMonthly);
+      ? formatMoney(Math.round(getPlanPrice(plan, currency, "yearly") / 12), currency)
+      : formatMoney(getPlanPrice(plan, currency, "monthly"), currency);
+
+  const yearlySavingsAmount = (plan: SubscriptionPlan) =>
+    getPlanPrice(plan, currency, "monthly") * 12 -
+    getPlanPrice(plan, currency, "yearly");
 
   return (
     <div className="flex items-center justify-center min-h-screen px-6 py-20">
@@ -124,7 +133,7 @@ const PlanPicker: React.FC<PlanPickerProps> = ({ onSelectPlan, onSkip, isLoading
           aria-label="Subscription plans"
         >
           {activePlans.map((plan, index) => {
-            const yearlySavings = calculateYearlySavings(plan);
+            const yearlySavings = yearlySavingsAmount(plan);
 
             return (
               <motion.div
@@ -174,7 +183,7 @@ const PlanPicker: React.FC<PlanPickerProps> = ({ onSelectPlan, onSkip, isLoading
                     </div>
                     {billingCycle === "yearly" && yearlySavings > 0 && (
                       <p className="text-emerald-400 text-xs mt-1">
-                        Save {formatNairaPrice(yearlySavings)}/year
+                        Save {formatMoney(yearlySavings, currency)}/year
                       </p>
                     )}
                     <p className="text-white/50 text-sm mt-2 line-clamp-2">
