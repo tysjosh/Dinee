@@ -33,7 +33,9 @@
  * Requirements: 10.2, 10.3, 10.4, 10.5, 10.6 (multi-platform-voice-integrations)
  */
 
-import { internalMutation } from "../_generated/server";
+import { internalMutation, mutation } from "../_generated/server";
+import type { MutationCtx } from "../_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 /** The stable Platform_Id Runsheet is registered under (Req 10.1). */
 const RUNSHEET_PLATFORM_ID = "runsheet";
@@ -77,9 +79,7 @@ export interface MigrationReport {
  * failure the original Runsheet row is left unchanged and the failing id is
  * reported while migration continues (Req 10.6). Returns a {@link MigrationReport}.
  */
-export const migrateRunsheetToGeneric = internalMutation({
-  args: {},
-  handler: async (ctx): Promise<MigrationReport> => {
+async function migrateRunsheetImpl(ctx: MutationCtx): Promise<MigrationReport> {
     const failures: MigrationFailure[] = [];
     let integrationsCopied = 0;
     let routesCopied = 0;
@@ -202,5 +202,35 @@ export const migrateRunsheetToGeneric = internalMutation({
       idempotentNoop:
         integrationsCopied === 0 && routesCopied === 0 && failures.length === 0,
     };
+}
+
+/**
+ * Internal entry point — invocable by an operator via the Convex CLI
+ * (`npx convex run integrations/migrateRunsheet:migrateRunsheetToGeneric`),
+ * which runs with deploy-key privileges (no in-app auth identity).
+ */
+export const migrateRunsheetToGeneric = internalMutation({
+  args: {},
+  handler: (ctx): Promise<MigrationReport> => migrateRunsheetImpl(ctx),
+});
+
+/**
+ * Admin-guarded public entry point — safe to expose to the in-app control
+ * plane. It runs the SAME idempotent migration but only for an authenticated
+ * `platform_admin`; any other caller is rejected before any write. This lets an
+ * admin trigger the migration from the console without opening it to tenants.
+ */
+export const runRunsheetMigrationAsAdmin = mutation({
+  args: {},
+  handler: async (ctx): Promise<MigrationReport> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Not authenticated");
+    }
+    const user = await ctx.db.get(userId);
+    if (!user || user.role !== "platform_admin") {
+      throw new Error("Only platform admins can run the Runsheet migration");
+    }
+    return migrateRunsheetImpl(ctx);
   },
 });
