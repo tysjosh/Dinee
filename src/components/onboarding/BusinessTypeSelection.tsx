@@ -14,44 +14,56 @@ interface VerticalOption {
   label: string;
   icon: string;
   description: string;
+  /** Whether this vertical is fully implemented (real dashboard + tools). */
+  available: boolean;
 }
 
+// Only Restaurant and Logistics have real dashboards and wired tool handlers.
+// Healthcare/Legal/Hospitality/General Services are prompt-only today (no
+// dashboard, no backend handlers), so they are shown as "Coming soon" and are
+// not selectable — an onboarded business there would hit dead ends.
 const VERTICAL_OPTIONS: VerticalOption[] = [
   {
     value: "restaurant",
     label: "Restaurant",
     icon: "🍽️",
     description: "Food ordering, menu management, and reservation handling",
+    available: true,
   },
   {
     value: "logistics",
     label: "Logistics",
     icon: "🚚",
     description: "Shipment tracking, rider dispatch, and delivery management",
+    available: true,
   },
   {
     value: "healthcare",
     label: "Healthcare",
     icon: "🏥",
     description: "Patient appointments, inquiries, and clinic management",
+    available: false,
   },
   {
     value: "legal",
     label: "Legal",
     icon: "⚖️",
     description: "Consultation booking, case inquiries, and client intake",
+    available: false,
   },
   {
     value: "hospitality",
     label: "Hospitality",
     icon: "🏨",
     description: "Room reservations, guest services, and concierge support",
+    available: false,
   },
   {
     value: "general_services",
     label: "General Services",
     icon: "🏢",
     description: "Appointment scheduling, service inquiries, and callbacks",
+    available: false,
   },
 ];
 
@@ -67,7 +79,8 @@ const BusinessTypeSelection: React.FC<BusinessTypeSelectionProps> = ({
   selectedVertical,
 }) => {
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent, vertical: Vertical) => {
+    (e: React.KeyboardEvent, vertical: Vertical, available: boolean) => {
+      if (!available) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         onSelect(vertical);
@@ -110,6 +123,7 @@ const BusinessTypeSelection: React.FC<BusinessTypeSelectionProps> = ({
         >
           {VERTICAL_OPTIONS.map((option, index) => {
             const isSelected = selectedVertical === option.value;
+            const isAvailable = option.available;
 
             return (
               <motion.div
@@ -121,14 +135,19 @@ const BusinessTypeSelection: React.FC<BusinessTypeSelectionProps> = ({
                 <div
                   role="radio"
                   aria-checked={isSelected}
-                  aria-label={`${option.label}: ${option.description}`}
-                  tabIndex={0}
-                  onClick={() => onSelect(option.value)}
-                  onKeyDown={(e) => handleKeyDown(e, option.value)}
-                  className={`card-minimal rounded-xl p-5 cursor-pointer transition-all duration-200 ${
-                    isSelected
-                      ? "ring-2 ring-emerald-500 border-emerald-500/50 bg-emerald-500/10"
-                      : "hover:border-white/20 hover:bg-white/5"
+                  aria-disabled={!isAvailable}
+                  aria-label={`${option.label}: ${option.description}${
+                    isAvailable ? "" : " (coming soon)"
+                  }`}
+                  tabIndex={isAvailable ? 0 : -1}
+                  onClick={() => isAvailable && onSelect(option.value)}
+                  onKeyDown={(e) => handleKeyDown(e, option.value, isAvailable)}
+                  className={`card-minimal rounded-xl p-5 transition-all duration-200 ${
+                    !isAvailable
+                      ? "opacity-50 cursor-not-allowed"
+                      : isSelected
+                        ? "cursor-pointer ring-2 ring-emerald-500 border-emerald-500/50 bg-emerald-500/10"
+                        : "cursor-pointer hover:border-white/20 hover:bg-white/5"
                   }`}
                 >
                   <div className="flex items-start gap-4">
@@ -136,14 +155,19 @@ const BusinessTypeSelection: React.FC<BusinessTypeSelectionProps> = ({
                       {option.icon}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-white font-medium text-lg">
+                      <h3 className="text-white font-medium text-lg flex items-center gap-2">
                         {option.label}
+                        {!isAvailable && (
+                          <span className="text-[10px] uppercase tracking-wide font-semibold text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5">
+                            Coming soon
+                          </span>
+                        )}
                       </h3>
                       <p className="text-white/60 text-sm mt-1">
                         {option.description}
                       </p>
                     </div>
-                    {isSelected && (
+                    {isSelected && isAvailable && (
                       <div className="flex-shrink-0 mt-1">
                         <svg
                           className="w-5 h-5 text-emerald-400"
