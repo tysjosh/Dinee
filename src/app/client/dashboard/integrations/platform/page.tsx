@@ -60,6 +60,17 @@ export default async function PlatformIntegrationAdminPage({
           label: f.label,
           required: f.required,
         })),
+        // Serializable typed-config schema (drives proper inputs, no factory).
+        configFields: resolved.definition.configFields?.map((f) => ({
+          name: f.name,
+          label: f.label,
+          type: f.type,
+          hint: f.hint,
+          options: f.options,
+          min: f.min,
+          max: f.max,
+          step: f.step,
+        })),
       }
     : null;
 

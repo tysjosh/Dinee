@@ -30,7 +30,147 @@ export interface PlatformCredentialField {
   required: boolean;
 }
 
+/** Serializable mirror of PlatformConfigFieldSpec passed from the server. */
+export interface PlatformConfigField {
+  name: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "select";
+  hint?: string;
+  options?: { value: string; label: string }[];
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
 export type ConnectionStatus = "connected" | "disconnected" | "error";
+
+// ============================================================================
+// Typed platform config (dotted-path, coerced) — Req 9 config schema
+// ============================================================================
+
+/** Reads a possibly-nested value by dotted path from an object. */
+function getByPath(obj: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((acc, seg) => {
+    if (acc && typeof acc === "object" && !Array.isArray(acc)) {
+      return (acc as Record<string, unknown>)[seg];
+    }
+    return undefined;
+  }, obj);
+}
+
+/** Sets a value at a dotted path, creating intermediate objects. */
+function setByPath(
+  obj: Record<string, unknown>,
+  path: string,
+  value: unknown
+): void {
+  const segs = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < segs.length - 1; i++) {
+    const seg = segs[i];
+    if (
+      !cur[seg] ||
+      typeof cur[seg] !== "object" ||
+      Array.isArray(cur[seg])
+    ) {
+      cur[seg] = {};
+    }
+    cur = cur[seg] as Record<string, unknown>;
+  }
+  cur[segs[segs.length - 1]] = value;
+}
+
+/**
+ * Flattens a stored config object into string form-values keyed by field name,
+ * for hydrating the typed inputs. Booleans become "true"/"false"; numbers and
+ * strings become their string form; missing values become "".
+ */
+export function flattenTypedConfig(
+  fields: PlatformConfigField[],
+  config: Record<string, unknown> | undefined
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const field of fields) {
+    const raw = config ? getByPath(config, field.name) : undefined;
+    if (field.type === "boolean") {
+      values[field.name] = raw === true ? "true" : "false";
+    } else if (raw === undefined || raw === null) {
+      values[field.name] = "";
+    } else {
+      values[field.name] = String(raw);
+    }
+  }
+  return values;
+}
+
+/**
+ * Builds the config object to persist from typed form values. Coerces per type,
+ * skips empty optional values (so cleared fields don't create keys), and
+ * assembles nested objects from dotted names. Schema-owned top-level keys are
+ * rebuilt from the form; any existing config keys NOT owned by the schema are
+ * preserved. Returns field-scoped errors for invalid numbers.
+ */
+export function buildTypedConfig(
+  fields: PlatformConfigField[],
+  values: Record<string, string>,
+  existingConfig: Record<string, unknown> | undefined
+): { ok: true; config: Record<string, unknown> } | { ok: false; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+
+  // Start from existing config minus the top-level keys the schema owns, so
+  // the schema fully controls its own keys while unknown keys are preserved.
+  const ownedTopKeys = new Set(fields.map((f) => f.name.split(".")[0]));
+  const config: Record<string, unknown> = {};
+  if (existingConfig) {
+    for (const [k, v] of Object.entries(existingConfig)) {
+      if (!ownedTopKeys.has(k)) config[k] = v;
+    }
+  }
+
+  for (const field of fields) {
+    const raw = (values[field.name] ?? "").trim();
+    if (field.type === "boolean") {
+      // Booleans are always explicit.
+      setByPath(config, field.name, values[field.name] === "true");
+      continue;
+    }
+    if (raw === "") continue; // skip empty optional values
+    if (field.type === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        errors[field.name] = `${field.label} must be a number`;
+        continue;
+      }
+      if (field.min !== undefined && n < field.min) {
+        errors[field.name] = `${field.label} must be ≥ ${field.min}`;
+        continue;
+      }
+      if (field.max !== undefined && n > field.max) {
+        errors[field.name] = `${field.label} must be ≤ ${field.max}`;
+        continue;
+      }
+      setByPath(config, field.name, n);
+    } else {
+      setByPath(config, field.name, raw);
+    }
+  }
+
+  // Prune any nested objects left empty (e.g. escalationTarget with no fields).
+  for (const key of ownedTopKeys) {
+    const val = config[key];
+    if (
+      val &&
+      typeof val === "object" &&
+      !Array.isArray(val) &&
+      Object.keys(val as Record<string, unknown>).length === 0
+    ) {
+      delete config[key];
+    }
+  }
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return { ok: true, config };
+}
 
 /** Turns a namespaced conversation type into a human label. */
 export function humanizeConversationType(type: string): string {
@@ -98,7 +238,16 @@ export interface ConfigFormInput {
   /** Credential inputs keyed by credential name (only entered values matter). */
   credentials: Record<string, string>;
   allowedTypesRaw: string;
+  /** Raw JSON config, used only when the platform declares no `configFields`. */
   configRaw: string;
+  /**
+   * Typed config schema + form values. When `configFields` is provided, the
+   * config object is built from these (with `existingConfig` preserved for
+   * unowned keys) instead of parsing `configRaw`.
+   */
+  configFields?: PlatformConfigField[];
+  configValues?: Record<string, string>;
+  existingConfig?: Record<string, unknown>;
   actorUserId?: string;
   actorRole?: string;
 }
@@ -148,7 +297,20 @@ export function prepareSaveConfig(
   }
 
   let config: Record<string, unknown> = {};
-  if (input.configRaw.trim()) {
+  if (input.configFields && input.configFields.length > 0) {
+    // Typed schema path: build (and validate) config from the typed inputs.
+    const built = buildTypedConfig(
+      input.configFields,
+      input.configValues ?? {},
+      input.existingConfig
+    );
+    if (built.ok) {
+      config = built.config;
+    } else {
+      Object.assign(errors, built.errors);
+    }
+  } else if (input.configRaw.trim()) {
+    // Fallback JSON path (platforms without a typed schema).
     try {
       const parsed = JSON.parse(input.configRaw);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {

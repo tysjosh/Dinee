@@ -42,13 +42,21 @@ import {
   prepareSaveConfig,
 } from "./platformIntegrationAdmin.logic";
 
-export type { PlatformCredentialField } from "./platformIntegrationAdmin.logic";
+export type {
+  PlatformCredentialField,
+  PlatformConfigField,
+} from "./platformIntegrationAdmin.logic";
+
+import type { PlatformConfigField } from "./platformIntegrationAdmin.logic";
+import { flattenTypedConfig } from "./platformIntegrationAdmin.logic";
 
 /** Serializable platform descriptor driving the form (Req 9.1). */
 export interface PlatformUiDescriptor {
   platformId: string;
   displayName: string;
   credentialFields: PlatformCredentialField[];
+  /** Typed non-secret settings schema; when present, replaces the JSON editor. */
+  configFields?: PlatformConfigField[];
 }
 
 interface PlatformIntegrationAdminProps {
@@ -84,6 +92,15 @@ export default function PlatformIntegrationAdmin({
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [allowedTypesRaw, setAllowedTypesRaw] = useState("");
   const [configRaw, setConfigRaw] = useState("");
+  // Typed config form values keyed by field name (when the platform declares a
+  // config schema). The stored config object is retained for hydration + to
+  // preserve unowned keys on save.
+  const configFields = platform?.configFields ?? [];
+  const hasConfigSchema = configFields.length > 0;
+  const [configValues, setConfigValues] = useState<Record<string, string>>({});
+  const [storedConfig, setStoredConfig] = useState<
+    Record<string, unknown> | undefined
+  >(undefined);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<
@@ -101,9 +118,18 @@ export default function PlatformIntegrationAdmin({
       setBaseUrl(masked.baseUrl ?? "");
       setPlatformTenantId(masked.platformTenantId ?? "");
       setAllowedTypesRaw((masked.allowedConversationTypes ?? []).join(", "));
-      if (masked.config && typeof masked.config === "object") {
+      const cfg =
+        masked.config && typeof masked.config === "object"
+          ? (masked.config as Record<string, unknown>)
+          : undefined;
+      setStoredConfig(cfg);
+      if (hasConfigSchema) {
+        // Typed schema: hydrate structured inputs from the stored config.
+        setConfigValues(flattenTypedConfig(configFields, cfg));
+      } else if (cfg) {
+        // Fallback: raw JSON editor.
         try {
-          setConfigRaw(JSON.stringify(masked.config, null, 2));
+          setConfigRaw(JSON.stringify(cfg, null, 2));
         } catch {
           setConfigRaw("");
         }
@@ -143,6 +169,9 @@ export default function PlatformIntegrationAdmin({
         credentials,
         allowedTypesRaw,
         configRaw,
+        configFields: hasConfigSchema ? configFields : undefined,
+        configValues: hasConfigSchema ? configValues : undefined,
+        existingConfig: storedConfig,
         actorUserId: user?.userId,
         actorRole: user?.role,
       },
@@ -381,31 +410,52 @@ export default function PlatformIntegrationAdmin({
               />
             </Field>
 
-            {/* Optional platform config (JSON) */}
-            <Field
-              id="config"
-              label="Platform config (JSON)"
-              error={fieldErrors.config}
-              hint="Optional. A JSON object of platform-specific settings."
-            >
-              <textarea
+            {/* Platform settings — typed inputs when the platform declares a
+                config schema, else a raw JSON fallback. */}
+            {hasConfigSchema ? (
+              <fieldset className="space-y-4 rounded-lg border border-gray-800 bg-gray-900/40 p-4">
+                <legend className="px-1 text-sm font-medium text-gray-200">
+                  {platform.displayName} settings
+                </legend>
+                {configFields.map((field) => (
+                  <ConfigFieldInput
+                    key={field.name}
+                    field={field}
+                    value={configValues[field.name] ?? ""}
+                    error={fieldErrors[field.name]}
+                    onChange={(v) => {
+                      setConfigValues((prev) => ({ ...prev, [field.name]: v }));
+                      clearFieldError(field.name);
+                    }}
+                  />
+                ))}
+              </fieldset>
+            ) : (
+              <Field
                 id="config"
-                rows={4}
-                className={`input font-mono text-xs ${
-                  fieldErrors.config ? "input-error" : ""
-                }`}
-                placeholder='{ "autoSubmitEnabled": false }'
-                value={configRaw}
-                onChange={(e) => {
-                  setConfigRaw(e.target.value);
-                  clearFieldError("config");
-                }}
-                aria-invalid={Boolean(fieldErrors.config)}
-                aria-describedby={
-                  fieldErrors.config ? "config-error" : undefined
-                }
-              />
-            </Field>
+                label="Platform config (JSON)"
+                error={fieldErrors.config}
+                hint="Optional. A JSON object of platform-specific settings."
+              >
+                <textarea
+                  id="config"
+                  rows={4}
+                  className={`input font-mono text-xs ${
+                    fieldErrors.config ? "input-error" : ""
+                  }`}
+                  placeholder='{ "autoSubmitEnabled": false }'
+                  value={configRaw}
+                  onChange={(e) => {
+                    setConfigRaw(e.target.value);
+                    clearFieldError("config");
+                  }}
+                  aria-invalid={Boolean(fieldErrors.config)}
+                  aria-describedby={
+                    fieldErrors.config ? "config-error" : undefined
+                  }
+                />
+              </Field>
+            )}
 
             {/* Save + status */}
             <div className="flex items-center gap-3 pt-2">
@@ -706,6 +756,85 @@ function PhoneRouteCard(props: PhoneRouteCardProps) {
         </div>
       </form>
     </section>
+  );
+}
+
+// ============================================================================
+// Typed platform config input
+// ============================================================================
+
+function ConfigFieldInput({
+  field,
+  value,
+  error,
+  onChange,
+}: {
+  field: PlatformConfigField;
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  const id = `cfg-${field.name}`;
+
+  if (field.type === "boolean") {
+    return (
+      <div className="flex items-start gap-3">
+        <input
+          id={id}
+          type="checkbox"
+          role="switch"
+          className="mt-0.5 h-4 w-4 rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
+          checked={value === "true"}
+          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+          aria-describedby={field.hint ? `${id}-hint` : undefined}
+        />
+        <div className="space-y-0.5">
+          <label
+            htmlFor={id}
+            className="block text-sm font-medium text-gray-200 cursor-pointer"
+          >
+            {field.label}
+          </label>
+          {field.hint && (
+            <p id={`${id}-hint`} className="text-xs text-gray-500">
+              {field.hint}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Field id={id} label={field.label} hint={field.hint} error={error}>
+      {field.type === "select" ? (
+        <select
+          id={id}
+          className={`input ${error ? "input-error" : ""}`}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {(field.options ?? []).map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={id}
+          type={field.type === "number" ? "number" : "text"}
+          inputMode={field.type === "number" ? "decimal" : undefined}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          className={`input ${error ? "input-error" : ""}`}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-invalid={Boolean(error)}
+        />
+      )}
+    </Field>
   );
 }
 

@@ -87,6 +87,33 @@ export interface PlatformDefinition {
    * single-pair integration entry points.
    */
   supportedConversationTypes?: string[];
+  /**
+   * Optional typed schema for the platform's non-secret settings stored in the
+   * generic `config` blob. When present, the admin UI renders proper typed
+   * inputs (select/boolean/number/text) for these instead of a raw JSON box.
+   * Field `name` supports dotted paths (e.g. "escalationTarget.kind") to build
+   * nested config objects. Additive: platforms without it fall back to the JSON
+   * editor and existing config is preserved untouched.
+   */
+  configFields?: PlatformConfigFieldSpec[];
+}
+
+/** The input type rendered for a {@link PlatformConfigFieldSpec}. */
+export type PlatformConfigFieldType = "string" | "number" | "boolean" | "select";
+
+/** A single non-secret platform setting, driving a typed admin input (Req 9). */
+export interface PlatformConfigFieldSpec {
+  /** Config key; supports dotted paths for nested objects (e.g. "a.b"). */
+  name: string;
+  label: string;
+  type: PlatformConfigFieldType;
+  hint?: string;
+  /** Options for `type: "select"`. */
+  options?: { value: string; label: string }[];
+  /** Numeric bounds/step for `type: "number"`. */
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 /** A credential the platform needs; drives the admin form + encryption (Req 9.1). */

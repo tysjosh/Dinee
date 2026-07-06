@@ -90,6 +90,58 @@ export const runsheetPlatformDefinition: PlatformDefinition = {
   // (Control_Plane Req 1.3). Additive and secret-free. Mirrors the pack's
   // declared types so the catalog never advertises an unroutable type.
   supportedConversationTypes: [...RUNSHEET_SUPPORTED_CONVERSATION_TYPES],
+  // Typed schema for Runsheet's non-secret settings (stored in the generic
+  // `config` blob). Drives proper inputs in the platform admin instead of raw
+  // JSON. Keys match what the runtime/pack read from `config`; dotted names
+  // assemble the nested `escalationTarget` object.
+  configFields: [
+    {
+      name: "defaultReviewMode",
+      label: "Default review mode",
+      type: "select",
+      options: [
+        { value: "always_review", label: "Always review" },
+        { value: "auto_submit_low_risk", label: "Auto-submit low risk" },
+      ],
+    },
+    {
+      name: "autoSubmitEnabled",
+      label: "Enable auto-submit for low-risk orders",
+      type: "boolean",
+      hint: "Applies only when the review mode is “Auto-submit low risk”.",
+    },
+    {
+      name: "confidenceThreshold",
+      label: "Auto-submit confidence threshold",
+      type: "number",
+      min: 0,
+      max: 1,
+      step: 0.01,
+      hint: "Optional. Minimum confidence score (0–1) to auto-submit.",
+    },
+    {
+      name: "requiresPurchaseOrder",
+      label: "Require a purchase order number",
+      type: "boolean",
+    },
+    {
+      name: "escalationTarget.kind",
+      label: "Escalation target type",
+      type: "select",
+      options: [
+        { value: "", label: "None" },
+        { value: "phone", label: "Phone" },
+        { value: "email", label: "Email" },
+        { value: "webhook", label: "Webhook" },
+      ],
+    },
+    {
+      name: "escalationTarget.value",
+      label: "Escalation target",
+      type: "string",
+      hint: "Phone number, email address, or webhook URL for escalations.",
+    },
+  ],
 };
 
 /**
