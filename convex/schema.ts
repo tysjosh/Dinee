@@ -594,9 +594,10 @@ export default defineSchema({
     ),
     currentPeriodStart: v.number(),
     currentPeriodEnd: v.number(),
-    paymentProvider: v.union(
-      v.literal("paystack"),
-      v.literal("flutterwave")
+    // Optional: a free trial started at onboarding has NO payment provider until
+    // the tenant adds one via the dashboard checkout. Existing rows keep theirs.
+    paymentProvider: v.optional(
+      v.union(v.literal("paystack"), v.literal("flutterwave"))
     ),
     paymentReference: v.optional(v.string()),
     createdAt: v.number(),

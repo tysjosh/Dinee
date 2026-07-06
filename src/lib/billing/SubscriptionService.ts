@@ -390,6 +390,16 @@ export class SubscriptionService {
 
     const price = calculatePlanPrice(plan, subscription.billingCycle);
 
+    // A trial subscription has no payment method on file — it cannot be charged
+    // until the tenant adds one via checkout.
+    if (!subscription.paymentProvider) {
+      return {
+        success: false,
+        status: subscription.status,
+        error: "No payment method on file (trial subscription)",
+      };
+    }
+
     try {
       const provider = this.getPaymentProvider(subscription.paymentProvider);
 

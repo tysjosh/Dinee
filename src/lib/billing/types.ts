@@ -130,8 +130,11 @@ export interface Subscription {
   currentPeriodStart: number;
   /** End of current billing period */
   currentPeriodEnd: number;
-  /** Payment provider used for billing */
-  paymentProvider: SubscriptionPaymentProvider;
+  /**
+   * Payment provider used for billing. Optional: a free trial started at
+   * onboarding has no provider until the tenant adds payment via checkout.
+   */
+  paymentProvider?: SubscriptionPaymentProvider;
   /** Payment reference from provider */
   paymentReference?: string;
   /** When the subscription was created */

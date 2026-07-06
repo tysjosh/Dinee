@@ -44,7 +44,9 @@ export default function OnboardingPage() {
   const router = useRouter();
   const { user } = useCurrentUser();
   const setCurrentUserTenant = useMutation(api.users.setCurrentUserTenant);
-  const createSubscription = useMutation(api.subscriptions.createSubscription);
+  const startTrialSubscription = useMutation(
+    api.subscriptions.startTrialSubscription
+  );
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("business-type");
   const [generatedBusinessId, setGeneratedBusinessId] = useState("");
   const [selectedVertical, setSelectedVertical] = useState<Vertical | undefined>();
@@ -106,25 +108,17 @@ export default function OnboardingPage() {
     if (!generatedBusinessId) return;
     setPlanLoading(true);
     try {
-      const now = Date.now();
-      const trialDays = 14;
-      const trialEndsAt = now + trialDays * 24 * 60 * 60 * 1000;
-      const subscriptionId = `SUB_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`.toUpperCase();
-
-      await createSubscription({
-        subscriptionId,
+      // Option A (free-trial-first): start a no-card trial for the chosen plan.
+      // No payment provider is attached; the tenant adds payment later via the
+      // dashboard checkout. Dates + id are computed server-side.
+      await startTrialSubscription({
         restaurantId: generatedBusinessId,
         planId,
-        status: "trialing",
-        currentPeriodStart: now,
-        currentPeriodEnd: trialEndsAt,
-        paymentProvider: "paystack",
         billingCycle,
-        trialEndsAt,
       });
     } catch (error) {
-      console.error("Failed to create subscription:", error);
-      // Continue — subscription can be created later from settings
+      console.error("Failed to start trial subscription:", error);
+      // Continue — a trial/subscription can be started later from billing.
     } finally {
       setPlanLoading(false);
     }
@@ -132,8 +126,10 @@ export default function OnboardingPage() {
   };
 
   const handlePlanSkipped = async () => {
-    // Default to Starter plan with 14-day trial
-    await handlePlanSelected("starter", "monthly");
+    // Skipping starts NO subscription — the tenant can start a trial or pay
+    // later from the billing dashboard. This keeps onboarding honest: we never
+    // create a subscription the user didn't choose.
+    goToPostPlanStep();
   };
 
   const goToPostPlanStep = () => {

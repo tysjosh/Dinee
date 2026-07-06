@@ -224,7 +224,8 @@ export const createSubscription = mutation({
     status: subscriptionStatusValidator,
     currentPeriodStart: v.number(),
     currentPeriodEnd: v.number(),
-    paymentProvider: paymentProviderValidator,
+    // Optional: omitted for a free trial with no card on file (Option A).
+    paymentProvider: v.optional(paymentProviderValidator),
     paymentReference: v.optional(v.string()),
     billingCycle: billingCycleValidator,
     trialEndsAt: v.optional(v.number()),
@@ -268,6 +269,70 @@ export const createSubscription = mutation({
     });
 
     return subscriptionId;
+  },
+});
+
+/**
+ * Start a free trial subscription with NO payment method (Option A:
+ * free-trial-first).
+ *
+ * This is the honest onboarding path: the tenant picks a plan and gets a
+ * time-boxed `trialing` subscription with NO `paymentProvider` and NO
+ * `paymentReference` — no charge is implied. Payment is collected later through
+ * the dashboard checkout (which sets a real provider + reference). Dates and the
+ * subscription id are computed server-side. Idempotent per restaurant: an
+ * existing subscription is updated rather than duplicated.
+ */
+export const startTrialSubscription = mutation({
+  args: {
+    restaurantId: v.string(),
+    planId: v.string(),
+    billingCycle: billingCycleValidator,
+    trialDays: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const trialDays = args.trialDays ?? 14;
+    const trialEndsAt = now + trialDays * 24 * 60 * 60 * 1000;
+    const subscriptionId = `SUB_${crypto.randomUUID()}`;
+
+    const existing = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_restaurant_id", (q) =>
+        q.eq("restaurantId", args.restaurantId)
+      )
+      .first();
+
+    if (existing) {
+      // Don't clobber an already-paid subscription with a trial.
+      if (existing.paymentReference || existing.status === "active") {
+        return existing._id;
+      }
+      await ctx.db.patch(existing._id, {
+        planId: args.planId,
+        status: "trialing",
+        currentPeriodStart: now,
+        currentPeriodEnd: trialEndsAt,
+        billingCycle: args.billingCycle,
+        trialEndsAt,
+        // Explicitly no payment provider/reference for a trial.
+        paymentProvider: undefined,
+        paymentReference: undefined,
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("subscriptions", {
+      subscriptionId,
+      restaurantId: args.restaurantId,
+      planId: args.planId,
+      status: "trialing",
+      currentPeriodStart: now,
+      currentPeriodEnd: trialEndsAt,
+      billingCycle: args.billingCycle,
+      trialEndsAt,
+      createdAt: now,
+    });
   },
 });
 

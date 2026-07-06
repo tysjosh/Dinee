@@ -119,8 +119,8 @@ export interface PaymentFailureRecord {
   errorMessage: string;
   /** Attempt number */
   attemptNumber: number;
-  /** Payment provider */
-  paymentProvider: SubscriptionPaymentProvider;
+  /** Payment provider (absent for a trial with no payment method). */
+  paymentProvider?: SubscriptionPaymentProvider;
   /** Amount that failed */
   amount: number;
   /** Currency */
@@ -299,6 +299,18 @@ export class PaymentRetryService {
     const amount = subscription.billingCycle === 'yearly' 
       ? plan.priceYearly 
       : plan.priceMonthly;
+
+    // A trial (or otherwise unpaid) subscription has no payment method, so
+    // there is nothing to retry — bail out clearly rather than charging.
+    if (!subscription.paymentProvider) {
+      return {
+        success: false,
+        status: subscription.status,
+        attemptNumber,
+        maxRetriesReached: false,
+        error: "No payment method on file (trial subscription)",
+      };
+    }
 
     try {
       const provider = this.getPaymentProvider(subscription.paymentProvider);
