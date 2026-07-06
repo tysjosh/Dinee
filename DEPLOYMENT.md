@@ -108,3 +108,69 @@ npm run server:start:prod
 - Ensure all environment variables are set correctly
 - Check Render logs for any runtime errors
 - Verify that your Twilio credentials are correct and the virtual number is active
+
+## Testing Stripe (US billing) locally
+
+US tenants (`country: "US"`) check out through **Stripe** in recurring
+subscription mode; Nigerian tenants continue to use Paystack. To exercise the
+Stripe path end to end on your machine:
+
+### 1. Configure test keys
+
+Add your Stripe **test** credentials to `.env.local` (gitignored):
+
+```
+STRIPE_SECRET_KEY=sk_test_...        # dashboard.stripe.com/test/apikeys
+STRIPE_WEBHOOK_SECRET=whsec_...       # printed by `stripe listen` (step 2)
+```
+
+If you use the Stripe CLI, `stripe login` provisions a temporary `sk_test_`
+key (it expires ~90 days, re-run `stripe login` if you see `api_key_expired`).
+
+### 2. Forward webhooks to the local route
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/client/api/v1/webhooks/stripe
+```
+
+Copy the `whsec_...` it prints into `STRIPE_WEBHOOK_SECRET`, then **restart
+`npm run dev`** so the API routes pick up the new env.
+
+### 3. Run a checkout
+
+Onboard (or upgrade) a **US** business and pick a plan. You'll be redirected to
+Stripe Checkout, pay with the test card `4242 4242 4242 4242` (any future
+expiry / any CVC / any ZIP).
+
+### 4. Verify the lifecycle
+
+Watch the `stripe listen` window: each forwarded event should return `[200]`.
+The subscription record transitions through:
+
+- `checkout.session.completed` → `status: active`, `stripeSubscriptionId` /
+  `stripeCustomerId` linked
+- `invoice.paid` → period extended, a `paid` invoice recorded
+- `invoice.payment_failed` → `status: past_due`
+- `customer.subscription.deleted` → `status: cancelled`
+
+You can simulate renewals/failures without a real charge:
+
+```bash
+stripe trigger invoice.paid
+stripe trigger invoice.payment_failed
+```
+
+### Endpoints
+
+- Checkout (provider auto-selected by tenant country): `POST /client/api/v1/billing/checkout`
+- Stripe webhook: `POST /client/api/v1/webhooks/stripe`
+- Paystack webhook (Nigeria): `POST /client/api/v1/webhooks/paystack`
+
+### Production
+
+Register a webhook endpoint in the Stripe dashboard pointing at
+`https://<your-domain>/client/api/v1/webhooks/stripe`, subscribing to at least:
+`checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`,
+`customer.subscription.deleted`. Use the endpoint's signing secret as
+`STRIPE_WEBHOOK_SECRET` and a live `sk_live_...` key as `STRIPE_SECRET_KEY`.
