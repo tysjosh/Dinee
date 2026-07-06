@@ -14,6 +14,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { createPaystackProvider } from "@/lib/payment/PaystackProvider";
 import { createFlutterwaveProvider } from "@/lib/payment/FlutterwaveProvider";
+import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import type { PaymentProvider } from "@/lib/payment/types";
 import { createLogger } from "@/lib/logger";
 
@@ -51,16 +52,23 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Resolve the provider that created this reference so Flutterwave
-    // payments are verified against Flutterwave (not Paystack).
+    // Resolve the provider that created this reference so each rail is
+    // verified against itself: Stripe checkout sessions (US), Flutterwave, or
+    // Paystack (default). The stored paymentReference is the Stripe session id
+    // for Stripe subscriptions, so it round-trips through this lookup.
     const subscription = await convexClient.query(
       api.subscriptions.getSubscriptionByPaymentReference,
       { paymentReference: reference },
     );
-    const provider: PaymentProvider =
-      subscription?.paymentProvider === "flutterwave"
-        ? createFlutterwaveProvider()
-        : createPaystackProvider();
+
+    let provider: PaymentProvider;
+    if (subscription?.paymentProvider === "stripe") {
+      provider = createStripeProvider();
+    } else if (subscription?.paymentProvider === "flutterwave") {
+      provider = createFlutterwaveProvider();
+    } else {
+      provider = createPaystackProvider();
+    }
 
     const verification = await provider.verifyTransaction(reference);
 

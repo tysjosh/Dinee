@@ -20,7 +20,13 @@ export default function BillingCallbackPage() {
   const [state, setState] = useState<VerifyState>("verifying");
   const [error, setError] = useState<string>("");
 
-  const reference = searchParams.get("reference") || searchParams.get("trxref");
+  // Paystack/Flutterwave redirect with `reference`/`trxref`; Stripe Checkout
+  // redirects with `session_id` (which is the reference we persisted on the
+  // subscription). Accept any of them.
+  const reference =
+    searchParams.get("reference") ||
+    searchParams.get("trxref") ||
+    searchParams.get("session_id");
 
   useEffect(() => {
     if (!reference) {
