@@ -56,6 +56,27 @@ export const storeIdempotencyKey = mutation({
     const now = Date.now();
     const TTL_MS = 86_400_000; // 24 hours
 
+    // Upsert: finalize the "pending" reservation created by
+    // reserveIdempotencyKey (patch in place) rather than inserting a duplicate.
+    // Falls back to insert for callers that store without reserving first.
+    const existing = await ctx.db
+      .query("idempotencyKeys")
+      .withIndex("by_key_and_partner", (q) =>
+        q.eq("key", args.key).eq("partnerId", args.partnerId)
+      )
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        requestHash: args.requestHash,
+        responseStatus: args.responseStatus,
+        responseBody: args.responseBody,
+        status: args.status ?? "success",
+        expiresAt: now + TTL_MS,
+      });
+      return;
+    }
+
     await ctx.db.insert("idempotencyKeys", {
       key: args.key,
       partnerId: args.partnerId,
@@ -66,6 +87,93 @@ export const storeIdempotencyKey = mutation({
       createdAt: now,
       expiresAt: now + TTL_MS,
     });
+  },
+});
+
+/**
+ * Atomically reserve an idempotency key BEFORE the caller runs any side
+ * effects. The check-and-insert happens inside a single Convex mutation
+ * transaction, so two concurrent requests with the same (key, partnerId) can
+ * never both proceed — Convex's optimistic concurrency serializes them and the
+ * loser observes the winner's reservation.
+ *
+ * Outcomes:
+ *  - "reserved":    key was free (or a prior "failed" attempt) — a "pending"
+ *                   record is written and the caller MUST proceed, then finalize
+ *                   via storeIdempotencyKey (success) / failed state.
+ *  - "in_progress": a "pending" record with the same request hash exists — a
+ *                   concurrent duplicate is mid-flight; caller should return 409.
+ *  - "replay":      a "success" record with the same hash exists — caller
+ *                   returns the stored response.
+ *  - "mismatch":    a record with a different request hash exists — 422.
+ *
+ * Requirements: 21.1–21.4, 3.8, 3.9, and Req 8 (atomic check-and-insert).
+ */
+export const reserveIdempotencyKey = mutation({
+  args: {
+    key: v.string(),
+    partnerId: v.string(),
+    requestHash: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const TTL_MS = 86_400_000; // 24 hours
+
+    const existing = await ctx.db
+      .query("idempotencyKeys")
+      .withIndex("by_key_and_partner", (q) =>
+        q.eq("key", args.key).eq("partnerId", args.partnerId)
+      )
+      .first();
+
+    if (!existing) {
+      await ctx.db.insert("idempotencyKeys", {
+        key: args.key,
+        partnerId: args.partnerId,
+        requestHash: args.requestHash,
+        responseStatus: 0,
+        responseBody: "",
+        status: "pending",
+        createdAt: now,
+        expiresAt: now + TTL_MS,
+      });
+      return { outcome: "reserved" as const };
+    }
+
+    const status = existing.status ?? "success";
+
+    // A prior attempt failed — allow re-execution by re-reserving.
+    if (status === "failed") {
+      await ctx.db.patch(existing._id, {
+        requestHash: args.requestHash,
+        responseStatus: 0,
+        responseBody: "",
+        status: "pending",
+        expiresAt: now + TTL_MS,
+      });
+      return { outcome: "reserved" as const };
+    }
+
+    // Another request holds the reservation and hasn't finalized yet.
+    if (status === "pending") {
+      return {
+        outcome:
+          existing.requestHash === args.requestHash
+            ? ("in_progress" as const)
+            : ("mismatch" as const),
+      };
+    }
+
+    // status === "success"
+    if (existing.requestHash === args.requestHash) {
+      return {
+        outcome: "replay" as const,
+        responseStatus: existing.responseStatus,
+        responseBody: existing.responseBody,
+      };
+    }
+
+    return { outcome: "mismatch" as const };
   },
 });
 

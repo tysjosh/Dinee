@@ -1030,9 +1030,14 @@ export default defineSchema({
     requestHash: v.string(),
     responseStatus: v.number(),
     responseBody: v.string(),
-    // Req 3.8, 3.9: Tracks whether the original mutation succeeded or failed.
-    // When "failed", retries re-execute the mutation instead of replaying the error.
-    status: v.optional(v.union(v.literal("success"), v.literal("failed"))),
+    // Req 3.8, 3.9: Tracks the mutation outcome for failed-state recovery.
+    // "pending" is written atomically when a key is first reserved (before side
+    // effects) so concurrent duplicates can't both execute; it is finalized to
+    // "success" or "failed" once the mutation completes. When "failed", retries
+    // re-execute the mutation instead of replaying the error.
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("success"), v.literal("failed"))
+    ),
     createdAt: v.number(),
     expiresAt: v.number(),
   })

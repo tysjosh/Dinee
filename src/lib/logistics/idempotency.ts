@@ -52,6 +52,29 @@ export type IdempotencyCheckResult =
   | IdempotencyProceed
   | IdempotencyFailed;
 
+/**
+ * Caller successfully reserved the key (it was free or a prior failed attempt).
+ * The caller MUST proceed with the mutation and then finalize via
+ * {@link storeIdempotencyResult} or {@link storeIdempotencyFailure}.
+ */
+export interface IdempotencyReserved {
+  reserved: true;
+}
+
+/**
+ * A concurrent request with the same key + body is already mid-flight (its
+ * reservation is still "pending"). The caller should return 409 Conflict.
+ */
+export interface IdempotencyInProgress {
+  inProgress: true;
+}
+
+export type IdempotencyReserveResult =
+  | IdempotencyReserved
+  | IdempotencyInProgress
+  | IdempotencyReplay
+  | IdempotencyMismatch;
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -107,6 +130,47 @@ export async function checkIdempotency(
 
   // Same key, different body → mismatch
   return { mismatch: true };
+}
+
+/**
+ * Atomically reserve an idempotency key before running side effects.
+ *
+ * This replaces the racy check-then-store pattern: the check-and-insert happens
+ * inside a single Convex mutation transaction, so two concurrent requests with
+ * the same (key, partnerId) can never both proceed.
+ *
+ * @returns
+ *  - `{ reserved: true }` — proceed with the mutation, then finalize
+ *  - `{ inProgress: true }` — a concurrent duplicate is mid-flight; return 409
+ *  - `{ replay: true, status, body }` — stored success; return it
+ *  - `{ mismatch: true }` — key reused with a different body; return 422
+ */
+export async function reserveIdempotency(
+  convexClient: ConvexHttpClient,
+  key: string,
+  partnerId: string,
+  requestHash: string
+): Promise<IdempotencyReserveResult> {
+  const result = await convexClient.mutation(
+    api.logistics.idempotencyKeys.reserveIdempotencyKey,
+    { key, partnerId, requestHash }
+  );
+
+  switch (result.outcome) {
+    case "reserved":
+      return { reserved: true };
+    case "in_progress":
+      return { inProgress: true };
+    case "replay":
+      return {
+        replay: true,
+        status: result.responseStatus ?? 200,
+        body: result.responseBody ?? "",
+      };
+    case "mismatch":
+    default:
+      return { mismatch: true };
+  }
 }
 
 /**

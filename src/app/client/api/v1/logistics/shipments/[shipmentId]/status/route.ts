@@ -19,7 +19,7 @@ import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { authorizeLogisticsAccess } from '@/lib/logistics/authorization';
 import { isLogisticsEnabled } from '@/lib/logistics/feature-gate';
 import { getOrCreateRequestId } from '@/lib/logistics/correlation';
-import { checkIdempotency, storeIdempotencyResult, storeIdempotencyFailure, hashRequestBody } from '@/lib/logistics/idempotency';
+import { reserveIdempotency, storeIdempotencyResult, storeIdempotencyFailure, hashRequestBody } from '@/lib/logistics/idempotency';
 import { dispatchLogisticsWebhookEvent } from '@/lib/logistics/webhook-dispatch';
 import { createLogger } from '@/lib/logger';
 import type { ApiErrorResponse } from '@/lib/partner-api/types';
@@ -184,7 +184,8 @@ export async function POST(
     const idempotencyKey = parsedIdempotencyKey;
     if (idempotencyKey) {
       const reqHash = bodyHash;
-      const idempotencyResult = await checkIdempotency(
+      // Atomically reserve the key before any side effects.
+      const idempotencyResult = await reserveIdempotency(
         convexClient,
         idempotencyKey,
         context.partnerId,
@@ -212,9 +213,8 @@ export async function POST(
         });
       }
 
-      // Req 3.8, 3.9: If previous attempt failed, re-execute the mutation
-      if ('failed' in idempotencyResult && idempotencyResult.failed) {
-        logger.info('Re-executing previously failed idempotent request', {
+      if ('inProgress' in idempotencyResult && idempotencyResult.inProgress) {
+        logger.warn('Concurrent duplicate idempotent request in progress', {
           tenantId,
           vertical: 'logistics',
           endpoint: `/api/v1/logistics/shipments/${shipmentId}/status`,
@@ -222,7 +222,15 @@ export async function POST(
           requestId,
           correlationId,
         });
+        return NextResponse.json(
+          {
+            error: 'Conflict',
+            message: 'A request with this idempotency key is already being processed',
+          },
+          { status: 409, headers: { 'X-Request-Id': requestId } }
+        );
       }
+      // else: reserved → proceed with the mutation below
     }
 
     // Req 4.1, 4.2: Audit log for status update request
@@ -297,6 +305,13 @@ export async function POST(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update shipment status';
 
+    // Req 3.8: Finalize the idempotency reservation as "failed" for ANY error
+    // so a retry re-executes rather than being blocked by a lingering "pending"
+    // reservation.
+    if (parsedIdempotencyKey && bodyHash) {
+      await storeIdempotencyFailure(convexClient, parsedIdempotencyKey, context.partnerId, bodyHash, message).catch(() => {});
+    }
+
     // Handle invalid transition errors (422)
     if (message.startsWith('Invalid status transition:')) {
       logger.warn('Invalid status transition rejected', {
@@ -331,11 +346,6 @@ export async function POST(
         { error: 'Not Found', message },
         { status: 404, headers: { 'X-Request-Id': requestId } }
       );
-    }
-
-    // Req 3.8: Store failed idempotency state on unexpected errors
-    if (parsedIdempotencyKey && bodyHash) {
-      await storeIdempotencyFailure(convexClient, parsedIdempotencyKey, context.partnerId, bodyHash, message).catch(() => {});
     }
 
     logger.error('Shipment status update failed', {
