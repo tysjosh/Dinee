@@ -287,9 +287,11 @@ export interface ProviderRoutingServiceConfig {
 export const DEFAULT_ROUTING_CONFIG: ProviderRoutingConfig = {
   routingRules: [
     {
+      // Aligned with convex REGION_PROVIDER_ROUTING (single source of truth):
+      // Nigeria uses Termii primary, Africa's Talking secondary.
       region: 'nigeria',
-      primaryProvider: 'africas_talking',
-      secondaryProvider: 'termii',
+      primaryProvider: 'termii',
+      secondaryProvider: 'africas_talking',
       abTestEnabled: false,
       abTestSplitRatio: 0.5,
       isActive: true,
