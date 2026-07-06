@@ -1,8 +1,13 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+
+/** The onboarding route is where users without a tenant belong, so the
+ * "no tenantId → redirect to onboarding" rule must not apply while on it
+ * (otherwise the guard renders null on the very page it redirects to). */
+const ONBOARDING_ROUTE = "/client/onboarding";
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -20,7 +25,11 @@ interface AuthGuardProps {
  */
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, isLoading, isAuthenticated } = useCurrentUser();
+
+  const onOnboarding =
+    pathname === ONBOARDING_ROUTE || pathname.startsWith(ONBOARDING_ROUTE + "/");
 
   useEffect(() => {
     if (isLoading) return;
@@ -30,10 +39,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
       return;
     }
 
-    if (user && !user.tenantId) {
+    if (user && !user.tenantId && !onOnboarding) {
       router.push("/client/onboarding");
     }
-  }, [isLoading, isAuthenticated, user, router]);
+  }, [isLoading, isAuthenticated, user, router, onOnboarding]);
 
   if (isLoading) {
     return (
@@ -61,7 +70,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return null;
   }
 
-  if (user && !user.tenantId) {
+  if (user && !user.tenantId && !onOnboarding) {
     return null;
   }
 

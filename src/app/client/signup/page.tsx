@@ -22,7 +22,7 @@ export default function SignUpPage() {
   const inviteToken = searchParams.get("invite");
 
   const { signIn } = useAuthActions();
-  const createUser = useMutation(api.users.createUser);
+  const upsertCurrentUserProfile = useMutation(api.users.upsertCurrentUserProfile);
 
   // Look up invitation if token is present (query will be wired when invitations module is created)
   const invitation = useQuery(
@@ -105,26 +105,19 @@ export default function SignUpPage() {
         : "";
       const tenantType = tenantId ? "restaurant" : "restaurant";
 
-      // Step 1: Sign up via Convex Auth (creates auth account + session)
+      // Step 1: Sign up via Convex Auth (creates the auth account + session and
+      // the single users row).
       await signIn("password", { email, password, flow: "signUp" });
 
-      // Step 2: Create the user record in our users table
-      try {
-        await createUser({
-          email,
-          passwordHash: "managed-by-convex-auth",
-          role: role as "restaurant_owner" | "branch_manager" | "supervisor",
-          tenantType,
-          tenantId,
-        });
-      } catch (createErr: unknown) {
-        const message = createErr instanceof Error ? createErr.message : String(createErr);
-        if (message.includes("already exists")) {
-          // User record already exists (e.g., from a previous attempt) — that's fine
-        } else {
-          throw createErr;
-        }
-      }
+      // Step 2: Populate app profile fields ON THAT SAME auth row (idempotent).
+      // No second row is created, so currentUser resolves a fully-populated
+      // record and there are never duplicate users for one email.
+      await upsertCurrentUserProfile({
+        email,
+        role: role as "restaurant_owner" | "branch_manager" | "supervisor",
+        tenantType,
+        tenantId,
+      });
 
       // Step 3: Redirect to onboarding
       router.push("/client/onboarding");

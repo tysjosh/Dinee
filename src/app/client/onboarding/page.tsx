@@ -43,7 +43,7 @@ type OnboardingStep =
 export default function OnboardingPage() {
   const router = useRouter();
   const { user } = useCurrentUser();
-  const updateUser = useMutation(api.users.updateUser);
+  const setCurrentUserTenant = useMutation(api.users.setCurrentUserTenant);
   const createSubscription = useMutation(api.subscriptions.createSubscription);
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("business-type");
   const [generatedBusinessId, setGeneratedBusinessId] = useState("");
@@ -78,18 +78,19 @@ export default function OnboardingPage() {
   const handleBusinessSetup = async (businessId: string) => {
     setGeneratedBusinessId(businessId);
 
-    // Link the authenticated user to the newly created restaurant
-    // by setting tenantId on the user record. This replaces localStorage
-    // as the primary identity mechanism. The TenantContext (via AppProvider)
-    // will automatically pick up the new tenantId from the user record.
-    if (user?.userId && businessId) {
+    // Link the authenticated user to the newly created business by setting
+    // tenantId on their auth row (resolved server-side via getAuthUserId, so it
+    // does NOT depend on user.userId — which is why the old updateUser call
+    // silently never ran). TenantContext picks up the new tenantId from the
+    // refreshed currentUser record.
+    if (businessId) {
       try {
-        await updateUser({
-          userId: user.userId,
+        await setCurrentUserTenant({
           tenantId: businessId,
+          tenantType: selectedVertical === "restaurant" ? "restaurant" : "business",
         });
       } catch (error) {
-        console.error("Failed to link user to restaurant:", error);
+        console.error("Failed to link user to business:", error);
         // Continue with onboarding — the user can retry from settings
       }
     }

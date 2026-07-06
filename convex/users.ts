@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 // User role validator (reusable)
@@ -31,6 +32,99 @@ function generateUserId(): string {
   }
   return result;
 }
+
+/**
+ * Populate the CURRENT authenticated user's app profile fields on their
+ * Convex Auth `users` row.
+ *
+ * The `users` table IS the Convex Auth users table. Signup previously inserted
+ * a SECOND row via `createUser`, which orphaned the app fields (the auth row —
+ * the one `currentUser`/`getAuthUserId` resolves — kept `role`/`tenantId`/`userId`
+ * empty). This patches the auth row in place instead, so there is exactly one
+ * row per person and `currentUser` returns a fully-populated record.
+ *
+ * Idempotent: re-running preserves an existing app `userId` and only fills
+ * missing fields, so a retried signup never creates duplicates or throws.
+ */
+export const upsertCurrentUserProfile = mutation({
+  args: {
+    role: userRoleValidator,
+    tenantType: tenantTypeValidator,
+    tenantId: v.string(),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("Not authenticated");
+    }
+
+    const existing = await ctx.db.get(authUserId);
+    if (!existing) {
+      throw new Error("Authenticated user row not found");
+    }
+
+    // Preserve an existing app userId; otherwise mint a unique one. The app
+    // `userId` field is retained for the `by_user_id` lookups still used by
+    // invitations / updateUser / updateLastLogin.
+    let appUserId = existing.userId;
+    if (!appUserId) {
+      let clash;
+      do {
+        appUserId = generateUserId();
+        clash = await ctx.db
+          .query("users")
+          .withIndex("by_user_id", (q) => q.eq("userId", appUserId!))
+          .first();
+      } while (clash && clash._id !== authUserId);
+    }
+
+    await ctx.db.patch(authUserId, {
+      userId: appUserId,
+      role: args.role,
+      tenantType: args.tenantType,
+      tenantId: args.tenantId,
+      ...(args.email ? { email: args.email } : {}),
+      createdAt: existing.createdAt ?? Date.now(),
+    });
+
+    return { userId: appUserId };
+  },
+});
+
+/**
+ * Link the CURRENT authenticated user to a tenant by patching their Convex Auth
+ * row (resolved via `getAuthUserId`).
+ *
+ * Replaces the onboarding call to `updateUser({ userId, tenantId })`, which
+ * depended on `user.userId` (undefined on the auth row) and therefore never
+ * wrote the tenant link — leaving onboarded users stuck in the onboarding
+ * redirect loop.
+ */
+export const setCurrentUserTenant = mutation({
+  args: {
+    tenantId: v.string(),
+    tenantType: v.optional(tenantTypeValidator),
+  },
+  handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("Not authenticated");
+    }
+
+    const existing = await ctx.db.get(authUserId);
+    if (!existing) {
+      throw new Error("Authenticated user row not found");
+    }
+
+    await ctx.db.patch(authUserId, {
+      tenantId: args.tenantId,
+      ...(args.tenantType ? { tenantType: args.tenantType } : {}),
+    });
+
+    return { success: true };
+  },
+});
 
 /**
  * Create a new user
@@ -112,23 +206,22 @@ export const getUserByEmail = query({
 });
 /**
  * Get the current authenticated user from the session identity.
- * Uses ctx.auth.getUserIdentity() to resolve the session, then
- * looks up the user record by email.
+ *
+ * Resolves the Convex Auth user id (the `users` table is the auth users table
+ * extended with app fields) and returns that document directly. This does NOT
+ * depend on `email` being present in the JWT identity — the Password provider
+ * does not always populate it, which previously made this return null and left
+ * post-login redirects stuck.
  */
 export const currentUser = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity?.email) {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
       return null;
     }
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", identity.email!))
-      .first();
-
-    return user;
+    return await ctx.db.get(userId);
   },
 });
 
