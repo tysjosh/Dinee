@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { verticalValidator } from "./shared/validators";
+import { requirePlatformAdmin } from "./shared/ownership";
 
 // Generate a 5-digit numeric restaurant ID
 function generateRestaurantId(): string {
@@ -71,10 +72,12 @@ export const getRestaurant = query({
   },
 });
 
-// Get all restaurants (for admin/seed purposes)
+// Get all restaurants (admin panel). Platform-wide read — admins only.
 export const getAllRestaurants = query({
   args: {},
   handler: async (ctx) => {
+    await requirePlatformAdmin(ctx);
+
     const restaurants = await ctx.db
       .query("restaurants")
       .order("desc")

@@ -47,10 +47,20 @@ export default function AdminPage() {
   // Redirect non-admins
   const isAdmin = state.userRole === "platform_admin";
 
-  // Queries
-  const restaurants = useQuery(api.restaurants.getAllRestaurants);
-  const users = useQuery(api.users.getAllUsers);
-  const subscriptions = useQuery(api.subscriptions.getAllSubscriptions);
+  // Queries — these are platform-wide admin reads (server-enforced to
+  // platform_admin). Skip them entirely until we've confirmed the caller is an
+  // admin, so a non-admin's browser never issues the privileged request (and
+  // never hits the server-side authorization error) before being redirected.
+  const canQuery = !userLoading && isAdmin;
+  const restaurants = useQuery(
+    api.restaurants.getAllRestaurants,
+    canQuery ? {} : "skip"
+  );
+  const users = useQuery(api.users.getAllUsers, canQuery ? {} : "skip");
+  const subscriptions = useQuery(
+    api.subscriptions.getAllSubscriptions,
+    canQuery ? {} : "skip"
+  );
 
   // Mutations
   const updateUser = useMutation(api.users.updateUser);

@@ -1,6 +1,12 @@
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import {
+  requireUser,
+  requirePlatformAdmin,
+  requireTenantAccess,
+  isPlatformAdmin,
+} from "./shared/ownership";
 
 // User role validator (reusable)
 const userRoleValidator = v.union(
@@ -181,6 +187,12 @@ export const createUser = mutation({
 export const getUser = query({
   args: { userId: v.string() },
   handler: async (ctx, args) => {
+    // A user may read their own record; platform admins may read anyone's.
+    const caller = await requireUser(ctx);
+    if (!isPlatformAdmin(caller) && caller.userId !== args.userId) {
+      throw new Error("Forbidden: cannot read another user's record");
+    }
+
     const user = await ctx.db
       .query("users")
       .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
@@ -196,6 +208,9 @@ export const getUser = query({
 export const getUserByEmail = query({
   args: { email: v.string() },
   handler: async (ctx, args) => {
+    // Email lookup enables account enumeration — restrict to platform admins.
+    await requirePlatformAdmin(ctx);
+
     const user = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", args.email))
@@ -234,6 +249,9 @@ export const getUsersByTenant = query({
     tenantId: v.string(),
   },
   handler: async (ctx, args) => {
+    // Only members of the tenant (or a platform admin) may list its users.
+    await requireTenantAccess(ctx, args.tenantId);
+
     const users = await ctx.db
       .query("users")
       .withIndex("by_tenant", (q) =>
@@ -251,6 +269,8 @@ export const getUsersByTenant = query({
 export const getAllUsers = query({
   args: {},
   handler: async (ctx) => {
+    // Platform-wide read — admins only.
+    await requirePlatformAdmin(ctx);
     const users = await ctx.db.query("users").collect();
     return users;
   },
@@ -269,6 +289,9 @@ export const updateUser = mutation({
     tenantId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Role/tenant changes are privileged — platform admins only.
+    await requirePlatformAdmin(ctx);
+
     const user = await ctx.db
       .query("users")
       .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
@@ -351,6 +374,9 @@ export const updateLastLogin = mutation({
 export const deleteUser = mutation({
   args: { userId: v.string() },
   handler: async (ctx, args) => {
+    // Deleting users is privileged — platform admins only.
+    await requirePlatformAdmin(ctx);
+
     const user = await ctx.db
       .query("users")
       .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
@@ -372,6 +398,9 @@ export const deleteUser = mutation({
 export const getUsersByRole = query({
   args: { role: userRoleValidator },
   handler: async (ctx, args) => {
+    // Platform-wide read — admins only.
+    await requirePlatformAdmin(ctx);
+
     // Note: This query doesn't use an index, so it's less efficient
     // Consider adding an index on role if this query is frequently used
     const users = await ctx.db

@@ -10,7 +10,7 @@
 
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
-import { requireTenantAccess } from "./shared/ownership";
+import { requireTenantAccess, requirePlatformAdmin } from "./shared/ownership";
 
 // ============================================================================
 // Subscription Status and Billing Cycle Validators
@@ -102,6 +102,8 @@ export const getSubscriptionsByStatus = query({
 export const getAllSubscriptions = query({
   args: {},
   handler: async (ctx) => {
+    // Platform-wide read (admin panel) — admins only.
+    await requirePlatformAdmin(ctx);
     const subscriptions = await ctx.db.query("subscriptions").collect();
     return subscriptions;
   },

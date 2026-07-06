@@ -46,6 +46,21 @@ export function isPlatformAdmin(user: Doc<"users">): boolean {
 }
 
 /**
+ * Require the authenticated caller to be a platform admin. Returns the user
+ * record on success; throws "Forbidden" otherwise. Use for platform-wide
+ * reads/writes (all-users, all-restaurants, role changes, deletions).
+ */
+export async function requirePlatformAdmin(
+  ctx: AnyCtx
+): Promise<Doc<"users">> {
+  const user = await requireUser(ctx);
+  if (!isPlatformAdmin(user)) {
+    throw new Error("Forbidden: platform admin access required");
+  }
+  return user;
+}
+
+/**
  * Require that the authenticated caller may act on the given restaurant/tenant
  * id — i.e. they are a platform admin, or their own `tenantId` matches.
  * Returns the resolved user record on success; throws "Forbidden" otherwise.
