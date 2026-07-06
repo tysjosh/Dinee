@@ -13,6 +13,8 @@ import { describe, it, expect } from "vitest";
 import {
   getDefaultPaymentProvider,
   getCurrencyForCountry,
+  getSubscriptionProvidersForCountry,
+  resolveSubscriptionProvider,
   formatMoney,
 } from "../../src/lib/region";
 import {
@@ -31,6 +33,27 @@ describe("region → payment provider + currency", () => {
     expect(getDefaultPaymentProvider(undefined)).toBe("paystack"); // default NG
     expect(getCurrencyForCountry("US")).toBe("USD");
     expect(getCurrencyForCountry("NG")).toBe("NGN");
+  });
+
+  it("makes Flutterwave selectable for Nigeria while excluding COD as a subscription rail", () => {
+    // Nigeria offers a choice of subscription rails; COD is per-order only.
+    expect(getSubscriptionProvidersForCountry("NG")).toEqual([
+      "paystack",
+      "flutterwave",
+    ]);
+    // The US has a single rail.
+    expect(getSubscriptionProvidersForCountry("US")).toEqual(["stripe"]);
+  });
+
+  it("honors a valid requested provider and falls back to the country default", () => {
+    // Flutterwave is now reachable at checkout for NG (previously dead).
+    expect(resolveSubscriptionProvider("NG", "flutterwave")).toBe("flutterwave");
+    expect(resolveSubscriptionProvider("NG", "paystack")).toBe("paystack");
+    // Invalid / cross-region / missing requests fall back to the default.
+    expect(resolveSubscriptionProvider("NG", "stripe")).toBe("paystack");
+    expect(resolveSubscriptionProvider("NG", "cod")).toBe("paystack");
+    expect(resolveSubscriptionProvider("NG", undefined)).toBe("paystack");
+    expect(resolveSubscriptionProvider("US", "flutterwave")).toBe("stripe");
   });
 });
 

@@ -16,6 +16,14 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { getPlanById } from "@/lib/billing/SubscriptionService";
 import type { BillingCycle } from "@/lib/billing/types";
+import { getSubscriptionProvidersForCountry } from "@/lib/region";
+
+/** Human labels for the payment rails offered at checkout. */
+const PROVIDER_LABELS: Record<string, string> = {
+  paystack: "Paystack",
+  flutterwave: "Flutterwave",
+  stripe: "Card (Stripe)",
+};
 
 export interface BillingDashboardContainerProps {
   tabId?: "billing";
@@ -31,8 +39,27 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
     api.subscriptions.getSubscriptionByRestaurant,
     restaurantId ? { restaurantId } : "skip"
   );
+  const restaurant = useQuery(
+    api.restaurants.getRestaurant,
+    restaurantId ? { restaurantId } : "skip"
+  );
   const schedulePlanChange = useMutation(api.subscriptions.schedulePlanChange);
   const setCancelAtPeriodEnd = useMutation(api.subscriptions.setCancelAtPeriodEnd);
+
+  // Payment rails available for the tenant's country. Nigeria offers a choice
+  // (Paystack / Flutterwave); the US has a single rail (Stripe), so no selector
+  // is shown there.
+  const providers = getSubscriptionProvidersForCountry(
+    (restaurant as { country?: string } | null | undefined)?.country
+  );
+  const [selectedProvider, setSelectedProvider] = useState<string>(providers[0]);
+
+  // Keep the selection valid once the tenant's country resolves.
+  React.useEffect(() => {
+    if (!providers.includes(selectedProvider)) {
+      setSelectedProvider(providers[0]);
+    }
+  }, [providers, selectedProvider]);
 
   /**
    * Initiate checkout — calls the billing checkout API and redirects to Paystack.
@@ -48,7 +75,12 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
         const response = await fetch("/client/api/v1/billing/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId, billingCycle, restaurantId }),
+          body: JSON.stringify({
+            planId,
+            billingCycle,
+            restaurantId,
+            paymentProvider: selectedProvider,
+          }),
         });
 
         if (!response.ok) {
@@ -72,7 +104,7 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
         setIsProcessing(false);
       }
     },
-    [restaurantId, isProcessing, showToast]
+    [restaurantId, isProcessing, showToast, selectedProvider]
   );
 
   /**
@@ -183,11 +215,38 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
   }
 
   return (
-    <BillingDashboard
-      restaurantId={restaurantId}
-      onChangePlan={handleChangePlan}
-      onCancelSubscription={handleCancelSubscription}
-    />
+    <div className="space-y-4">
+      {providers.length > 1 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <fieldset className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-white/10 bg-white/5">
+            <legend className="sr-only">Payment method</legend>
+            <span className="text-sm text-white/60">Pay with</span>
+            {providers.map((provider) => (
+              <label
+                key={provider}
+                className="flex items-center gap-2 text-sm text-white cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  name="payment-provider"
+                  value={provider}
+                  checked={selectedProvider === provider}
+                  onChange={() => setSelectedProvider(provider)}
+                  className="accent-emerald-500"
+                />
+                {PROVIDER_LABELS[provider] ?? provider}
+              </label>
+            ))}
+          </fieldset>
+        </div>
+      )}
+
+      <BillingDashboard
+        restaurantId={restaurantId}
+        onChangePlan={handleChangePlan}
+        onCancelSubscription={handleCancelSubscription}
+      />
+    </div>
   );
 };
 

@@ -1,8 +1,10 @@
 /**
  * Billing Verify API Route
  *
- * Verifies a Paystack transaction by reference, and if successful,
- * activates the pending subscription in Convex.
+ * Verifies a Nigerian (Paystack or Flutterwave) transaction by reference and,
+ * if successful, activates the pending subscription in Convex. The provider is
+ * resolved from the subscription record so Flutterwave payments verify against
+ * Flutterwave rather than always Paystack. (Stripe/US activates via webhook.)
  *
  * @module api/billing/verify
  */
@@ -11,6 +13,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { createPaystackProvider } from "@/lib/payment/PaystackProvider";
+import { createFlutterwaveProvider } from "@/lib/payment/FlutterwaveProvider";
+import type { PaymentProvider } from "@/lib/payment/types";
 import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("billing-verify");
@@ -47,8 +51,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const paystack = createPaystackProvider();
-    const verification = await paystack.verifyTransaction(reference);
+    // Resolve the provider that created this reference so Flutterwave
+    // payments are verified against Flutterwave (not Paystack).
+    const subscription = await convexClient.query(
+      api.subscriptions.getSubscriptionByPaymentReference,
+      { paymentReference: reference },
+    );
+    const provider: PaymentProvider =
+      subscription?.paymentProvider === "flutterwave"
+        ? createFlutterwaveProvider()
+        : createPaystackProvider();
+
+    const verification = await provider.verifyTransaction(reference);
 
     if (!verification.success || verification.status !== "paid") {
       logger.error("Payment verification failed", { reference, status: verification.status });

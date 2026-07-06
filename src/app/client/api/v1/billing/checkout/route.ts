@@ -20,7 +20,7 @@ import {
 import { createStripeProvider } from "@/lib/payment/StripeProvider";
 import { createLogger } from "@/lib/logger";
 import type { BillingCycle, SubscriptionPaymentProvider } from "@/lib/billing/types";
-import { getDefaultPaymentProvider } from "@/lib/region";
+import { resolveSubscriptionProvider } from "@/lib/region";
 
 const logger = createLogger("billing-checkout");
 
@@ -32,6 +32,11 @@ interface CheckoutRequestBody {
   planId: string;
   billingCycle: BillingCycle;
   restaurantId: string;
+  /**
+   * Optional payment rail. Honored only when valid for the tenant's country
+   * (e.g. "flutterwave" for Nigeria); otherwise the country default is used.
+   */
+  paymentProvider?: string;
 }
 
 // ============================================================================
@@ -75,7 +80,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { planId, billingCycle, restaurantId } = body;
+  const { planId, billingCycle, restaurantId, paymentProvider: requestedProvider } = body;
 
   if (!planId || typeof planId !== "string") {
     return NextResponse.json(
@@ -111,15 +116,18 @@ export async function POST(request: NextRequest) {
   const callbackUrl = buildCallbackUrl(request);
   const subscriptionService = createSubscriptionService(callbackUrl);
 
-  // 3b. Resolve the tenant's country to pick the right payment rail:
-  //     US → Stripe (USD), Nigeria → Paystack (NGN). Defaults to Nigeria.
+  // 3b. Resolve the payment rail from the tenant's country, honoring an
+  //     explicit (validated) provider choice when the caller sends one:
+  //       US       → Stripe (USD)
+  //       Nigeria  → Paystack (default) or Flutterwave (if requested)
+  //     Defaults to Nigeria/Paystack when the lookup fails.
   let paymentProvider: SubscriptionPaymentProvider = "paystack";
   try {
     const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
       restaurantId,
     });
     const country = (restaurant as { country?: string } | null)?.country;
-    const provider = getDefaultPaymentProvider(country);
+    const provider = resolveSubscriptionProvider(country, requestedProvider);
     if (provider === "stripe" || provider === "paystack" || provider === "flutterwave") {
       paymentProvider = provider;
     }
