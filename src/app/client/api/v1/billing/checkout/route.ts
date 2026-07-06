@@ -43,13 +43,25 @@ interface CheckoutRequestBody {
 // Helpers
 // ============================================================================
 
-function getConvexClient(): ConvexHttpClient | null {
+function getConvexClient(authToken?: string): ConvexHttpClient | null {
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!convexUrl) {
     logger.error("NEXT_PUBLIC_CONVEX_URL environment variable is not set");
     return null;
   }
-  return new ConvexHttpClient(convexUrl);
+  const client = new ConvexHttpClient(convexUrl);
+  // Forward the caller's Convex Auth session so server-side Convex calls run as
+  // the authenticated user (enabling ownership checks in the mutations).
+  if (authToken) client.setAuth(authToken);
+  return client;
+}
+
+/** Extract the bearer token from the Authorization header, if present. */
+function getBearerToken(request: NextRequest): string | undefined {
+  const header = request.headers.get("authorization");
+  if (!header) return undefined;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : undefined;
 }
 
 function buildCallbackUrl(request: NextRequest): string {
@@ -103,13 +115,33 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Initialize Convex client
-  const convexClient = getConvexClient();
+  // 2. Initialize Convex client with the caller's session token.
+  const authToken = getBearerToken(request);
+  const convexClient = getConvexClient(authToken);
   if (!convexClient) {
     return NextResponse.json(
       { error: "Server configuration error" },
       { status: 500 },
     );
+  }
+
+  // 2b. Authenticate the caller and verify they own the target restaurant.
+  //     Prevents a caller from passing another tenant's restaurantId to create
+  //     or overwrite that tenant's subscription. Platform admins may act on any.
+  try {
+    const me = await convexClient.query(api.users.currentUser, {});
+    if (!me) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const owns = me.role === "platform_admin" || me.tenantId === restaurantId;
+    if (!owns) {
+      return NextResponse.json(
+        { error: "You do not have access to this restaurant's billing" },
+        { status: 403 },
+      );
+    }
+  } catch {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   }
 
   // 3. Build callback URL and create SubscriptionService

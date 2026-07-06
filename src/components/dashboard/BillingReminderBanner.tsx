@@ -11,6 +11,7 @@
 
 import React, { useCallback, useState } from "react";
 import { useQuery } from "convex/react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import { api } from "../../../convex/_generated/api";
 import { useBusinessStorage } from "@/hooks/useBusinessStorage";
 import { getPlanById, getPlanPrice } from "@/lib/billing/SubscriptionService";
@@ -25,6 +26,7 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
   onNavigateToBilling,
 }) => {
   const { businessId: restaurantId } = useBusinessStorage();
+  const authToken = useAuthToken();
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
 
   const subscription = useQuery(
@@ -48,7 +50,10 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
     try {
       const response = await fetch("/client/api/v1/billing/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({
           planId: subscription.planId,
           billingCycle: subscription.billingCycle ?? "monthly",
@@ -70,7 +75,7 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
     } finally {
       setIsCheckoutLoading(false);
     }
-  }, [restaurantId, subscription, onNavigateToBilling]);
+  }, [restaurantId, subscription, onNavigateToBilling, authToken]);
 
   // Don't render while loading or if no subscription
   if (!subscription) return null;

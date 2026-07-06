@@ -9,6 +9,7 @@
  */
 
 import React, { useCallback, useState } from "react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import { BillingDashboard } from "./BillingDashboard";
 import { useBusinessStorage } from "@/hooks/useBusinessStorage";
 import { useShowToast } from "@/hooks/useShowToast";
@@ -32,6 +33,7 @@ export interface BillingDashboardContainerProps {
 const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () => {
   const { businessId: restaurantId, loading } = useBusinessStorage();
   const { showToast } = useShowToast();
+  const authToken = useAuthToken();
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Convex queries & mutations
@@ -74,7 +76,10 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
       try {
         const response = await fetch("/client/api/v1/billing/checkout", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
           body: JSON.stringify({
             planId,
             billingCycle,
@@ -104,7 +109,7 @@ const BillingDashboardContainer: React.FC<BillingDashboardContainerProps> = () =
         setIsProcessing(false);
       }
     },
-    [restaurantId, isProcessing, showToast, selectedProvider]
+    [restaurantId, isProcessing, showToast, selectedProvider, authToken]
   );
 
   /**

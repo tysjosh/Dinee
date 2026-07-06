@@ -10,6 +10,7 @@
 
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
+import { requireTenantAccess } from "./shared/ownership";
 
 // ============================================================================
 // Subscription Status and Billing Cycle Validators
@@ -232,6 +233,11 @@ export const createSubscription = mutation({
     trialEndsAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Only the tenant that owns this restaurant (or a platform admin) may
+    // create/replace its subscription. Prevents a caller from spoofing another
+    // tenant's restaurantId to overwrite their billing.
+    await requireTenantAccess(ctx, args.restaurantId);
+
     const now = Date.now();
 
     // Check if restaurant already has a subscription — update it instead of rejecting
@@ -1110,6 +1116,9 @@ export const schedulePlanChange = mutation({
       throw new Error(`Subscription ${args.subscriptionId} not found`);
     }
 
+    // The caller must own the restaurant this subscription belongs to.
+    await requireTenantAccess(ctx, subscription.restaurantId);
+
     if (subscription.status === "cancelled") {
       throw new Error("Cannot schedule a plan change for a cancelled subscription");
     }
@@ -1146,6 +1155,9 @@ export const setCancelAtPeriodEnd = mutation({
     if (!subscription) {
       throw new Error(`Subscription ${args.subscriptionId} not found`);
     }
+
+    // The caller must own the restaurant this subscription belongs to.
+    await requireTenantAccess(ctx, subscription.restaurantId);
 
     await ctx.db.patch(subscription._id, {
       cancelAtPeriodEnd: args.cancelAtPeriodEnd,
