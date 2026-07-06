@@ -47,11 +47,14 @@ import Button from '@/components/ui/Button';
 import {
   SUBSCRIPTION_PLANS,
   getPlanById,
-  formatNairaPrice,
-  calculateYearlySavings,
+  getPlanPrice,
   isUnlimited,
-  getPlanComparisonData,
 } from '@/lib/billing/SubscriptionService';
+import {
+  formatMoney,
+  getCurrencyForCountry,
+  type CurrencyCode,
+} from '@/lib/region';
 import type {
   SubscriptionPlan,
   Subscription,
@@ -180,10 +183,12 @@ function BillingReminderBanner({
   daysUntilRenewal,
   planName,
   amount,
+  currency,
 }: {
   daysUntilRenewal: number;
   planName: string;
   amount: number;
+  currency: CurrencyCode;
 }) {
   if (daysUntilRenewal > 7) return null;
 
@@ -210,7 +215,7 @@ function BillingReminderBanner({
         </p>
         <p className="text-xs text-white/60 mt-0.5">
           Your {planName} plan renews in {daysUntilRenewal} day{daysUntilRenewal !== 1 ? 's' : ''}.
-          Amount due: {formatNairaPrice(amount)}
+          Amount due: {formatMoney(amount, currency)}
         </p>
       </div>
       <Button variant="outline" size="sm" className="btn btn-outline btn-sm">
@@ -227,12 +232,14 @@ function BillingReminderBanner({
 function CurrentPlanCard({
   subscription,
   plan,
+  currency,
   onUpgrade,
   onDowngrade,
   onCancel,
 }: {
   subscription: Subscription;
   plan: SubscriptionPlan;
+  currency: CurrencyCode;
   onUpgrade: () => void;
   onDowngrade: () => void;
   onCancel?: () => void;
@@ -273,10 +280,9 @@ function CurrentPlanCard({
         <div className="p-3 rounded-lg bg-white/5 border border-white/10">
           <p className="text-xs text-white/40 mb-1">Current Price</p>
           <p className="text-xl font-semibold text-white">
-            {formatNairaPrice(
-              subscription.billingCycle === 'yearly'
-                ? plan.priceYearly
-                : plan.priceMonthly
+            {formatMoney(
+              getPlanPrice(plan, currency, subscription.billingCycle),
+              currency
             )}
             <span className="text-sm text-white/40 font-normal">
               /{subscription.billingCycle === 'yearly' ? 'year' : 'month'}
@@ -477,7 +483,7 @@ function InvoiceRow({ invoice }: { invoice: SubscriptionInvoice }) {
       </td>
       <td className="p-4">
         <p className="text-sm font-medium text-white">
-          {formatNairaPrice(invoice.amount)}
+          {formatMoney(invoice.amount, invoice.currency === "USD" ? "USD" : "NGN")}
         </p>
       </td>
       <td className="p-4">
@@ -564,18 +570,21 @@ function PlanComparisonCard({
   plan,
   isCurrentPlan,
   billingCycle,
+  currency,
   onSelect,
 }: {
   plan: SubscriptionPlan;
   isCurrentPlan: boolean;
   billingCycle: BillingCycle;
+  currency: CurrencyCode;
   onSelect: () => void;
 }) {
-  const price = billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly;
-  const monthlyEquivalent = billingCycle === 'yearly' 
-    ? Math.round(plan.priceYearly / 12) 
-    : plan.priceMonthly;
-  const savings = calculateYearlySavings(plan);
+  const monthlyEquivalent = billingCycle === 'yearly'
+    ? Math.round(getPlanPrice(plan, currency, 'yearly') / 12)
+    : getPlanPrice(plan, currency, 'monthly');
+  const savings =
+    getPlanPrice(plan, currency, 'monthly') * 12 -
+    getPlanPrice(plan, currency, 'yearly');
 
   return (
     <div
@@ -604,13 +613,13 @@ function PlanComparisonCard({
         <p className="text-sm text-white/60 mb-4">{plan.description}</p>
         <div className="mb-2">
           <span className="text-3xl font-bold text-white">
-            {formatNairaPrice(monthlyEquivalent)}
+            {formatMoney(monthlyEquivalent, currency)}
           </span>
           <span className="text-white/40">/month</span>
         </div>
-        {billingCycle === 'yearly' && (
+        {billingCycle === 'yearly' && savings > 0 && (
           <p className="text-xs text-emerald-400">
-            Save {formatNairaPrice(savings)}/year
+            Save {formatMoney(savings, currency)}/year
           </p>
         )}
       </div>
@@ -692,11 +701,13 @@ function PlanComparisonCard({
 function PlanComparisonSection({
   currentPlanId,
   billingCycle,
+  currency,
   onBillingCycleChange,
   onSelectPlan,
 }: {
   currentPlanId: string;
   billingCycle: BillingCycle;
+  currency: CurrencyCode;
   onBillingCycleChange: (cycle: BillingCycle) => void;
   onSelectPlan: (planId: string) => void;
 }) {
@@ -747,6 +758,7 @@ function PlanComparisonSection({
             plan={plan}
             isCurrentPlan={plan.id === currentPlanId}
             billingCycle={billingCycle}
+            currency={currency}
             onSelect={() => onSelectPlan(plan.id)}
           />
         ))}
@@ -802,6 +814,12 @@ export function BillingDashboard({
   const subscription = useQuery(api.subscriptions.getSubscriptionByRestaurant, {
     restaurantId,
   });
+
+  // Tenant country drives the billing currency (US → USD, NG → NGN).
+  const restaurant = useQuery(api.restaurants.getRestaurant, { restaurantId });
+  const currency = getCurrencyForCountry(
+    (restaurant as { country?: string } | null | undefined)?.country
+  );
   
   const invoices = useQuery(api.subscriptions.getInvoicesByRestaurant, {
     restaurantId,
@@ -828,7 +846,7 @@ export function BillingDashboard({
     : 0;
 
   const renewalAmount = plan
-    ? (subscription?.billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly)
+    ? getPlanPrice(plan, currency, subscription?.billingCycle ?? 'monthly')
     : 0;
 
   // Handlers
@@ -880,6 +898,7 @@ export function BillingDashboard({
         <PlanComparisonSection
           currentPlanId=""
           billingCycle={billingCycle}
+          currency={currency}
           onBillingCycleChange={setBillingCycle}
           onSelectPlan={handleSelectPlan}
         />
@@ -916,6 +935,7 @@ export function BillingDashboard({
         daysUntilRenewal={daysUntilRenewal}
         planName={plan.name}
         amount={renewalAmount}
+        currency={currency}
       />
 
       {/* Current Plan and Usage Grid */}
@@ -923,6 +943,7 @@ export function BillingDashboard({
         <CurrentPlanCard
           subscription={subscription}
           plan={plan}
+          currency={currency}
           onUpgrade={handleUpgrade}
           onDowngrade={handleDowngrade}
           onCancel={onCancelSubscription}
@@ -959,6 +980,7 @@ export function BillingDashboard({
             <PlanComparisonSection
               currentPlanId={subscription.planId}
               billingCycle={billingCycle}
+              currency={currency}
               onBillingCycleChange={setBillingCycle}
               onSelectPlan={handleSelectPlan}
             />

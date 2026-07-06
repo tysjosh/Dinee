@@ -13,7 +13,8 @@ import React, { useCallback, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { useBusinessStorage } from "@/hooks/useBusinessStorage";
-import { getPlanById, formatNairaPrice } from "@/lib/billing/SubscriptionService";
+import { getPlanById, getPlanPrice } from "@/lib/billing/SubscriptionService";
+import { formatMoney, getCurrencyForCountry } from "@/lib/region";
 import { cn } from "@/lib/utils";
 
 interface BillingReminderBannerProps {
@@ -29,6 +30,15 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
   const subscription = useQuery(
     api.subscriptions.getSubscriptionByRestaurant,
     restaurantId ? { restaurantId } : "skip"
+  );
+
+  // Tenant country drives the billing currency (US → USD, NG → NGN).
+  const restaurant = useQuery(
+    api.restaurants.getRestaurant,
+    restaurantId ? { restaurantId } : "skip"
+  );
+  const currency = getCurrencyForCountry(
+    (restaurant as { country?: string } | null | undefined)?.country
   );
 
   const handleCheckout = useCallback(async () => {
@@ -84,7 +94,7 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
     ? Math.max(0, Math.ceil((subscription.trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000)))
     : 0;
 
-  const price = plan?.priceMonthly ?? 0;
+  const price = plan ? getPlanPrice(plan, currency, "monthly") : 0;
 
   return (
     <div
@@ -137,7 +147,7 @@ const BillingReminderBanner: React.FC<BillingReminderBannerProps> = ({
           <p className="text-xs text-white/60 mt-0.5">
             {isPastDue
               ? `Your ${planName} subscription is past due. Update your payment to avoid service interruption.`
-              : `Your ${planName} trial ends soon.${price > 0 ? ` Subscribe now for ${formatNairaPrice(price)}/month.` : ""}`}
+              : `Your ${planName} trial ends soon.${price > 0 ? ` Subscribe now for ${formatMoney(price, currency)}/month.` : ""}`}
           </p>
         </div>
 
