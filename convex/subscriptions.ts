@@ -30,7 +30,8 @@ const billingCycleValidator = v.union(
 
 const paymentProviderValidator = v.union(
   v.literal("paystack"),
-  v.literal("flutterwave")
+  v.literal("flutterwave"),
+  v.literal("stripe")
 );
 
 const invoiceStatusValidator = v.union(

@@ -14,7 +14,8 @@ import { mutation, query } from "./_generated/server";
 const providerValidator = v.union(
   v.literal("paystack"),
   v.literal("flutterwave"),
-  v.literal("whatsapp")
+  v.literal("whatsapp"),
+  v.literal("stripe")
 );
 
 /**

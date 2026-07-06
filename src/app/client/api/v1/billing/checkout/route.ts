@@ -14,7 +14,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { createSubscriptionService } from "@/lib/billing/SubscriptionService";
 import { createLogger } from "@/lib/logger";
-import type { BillingCycle } from "@/lib/billing/types";
+import type { BillingCycle, SubscriptionPaymentProvider } from "@/lib/billing/types";
+import { getDefaultPaymentProvider } from "@/lib/region";
 
 const logger = createLogger("billing-checkout");
 
@@ -105,13 +106,29 @@ export async function POST(request: NextRequest) {
   const callbackUrl = buildCallbackUrl(request);
   const subscriptionService = createSubscriptionService(callbackUrl);
 
-  // 4. Initialize subscription (calls PaystackProvider.initializeTransaction)
+  // 3b. Resolve the tenant's country to pick the right payment rail:
+  //     US → Stripe (USD), Nigeria → Paystack (NGN). Defaults to Nigeria.
+  let paymentProvider: SubscriptionPaymentProvider = "paystack";
+  try {
+    const restaurant = await convexClient.query(api.restaurants.getRestaurant, {
+      restaurantId,
+    });
+    const country = (restaurant as { country?: string } | null)?.country;
+    const provider = getDefaultPaymentProvider(country);
+    if (provider === "stripe" || provider === "paystack" || provider === "flutterwave") {
+      paymentProvider = provider;
+    }
+  } catch {
+    // Fall back to the default (paystack) if the lookup fails.
+  }
+
+  // 4. Initialize subscription with the region-selected provider.
   try {
     const result = await subscriptionService.initializeSubscription({
       restaurantId,
       planId,
       billingCycle,
-      paymentProvider: "paystack",
+      paymentProvider,
       startTrial: false,
     });
 

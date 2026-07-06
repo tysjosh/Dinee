@@ -43,7 +43,7 @@ export interface Permission {
  */
 export interface PlatformSettings {
   defaultLanguage: 'english' | 'nigerian_english' | 'pidgin' | 'spanish' | 'french';
-  enabledPaymentMethods: ('paystack' | 'flutterwave' | 'cod')[];
+  enabledPaymentMethods: ('paystack' | 'flutterwave' | 'cod' | 'stripe')[];
   whatsappEnabled: boolean;
   smsEnabled: boolean;
 }

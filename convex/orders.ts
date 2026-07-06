@@ -245,7 +245,8 @@ export const updateOrder = mutation({
     paymentMethod: v.optional(v.union(
       v.literal("paystack"),
       v.literal("flutterwave"),
-      v.literal("cod")
+      v.literal("cod"),
+      v.literal("stripe")
     )),
     paymentStatus: v.optional(v.union(
       v.literal("pending"),
@@ -309,7 +310,7 @@ export const updateOrder = mutation({
       status?: "active" | "preparing" | "ready" | "completed" | "cancelled";
       cancellationReason?: string;
       // Payment fields
-      paymentMethod?: "paystack" | "flutterwave" | "cod";
+      paymentMethod?: "paystack" | "flutterwave" | "cod" | "stripe";
       paymentStatus?: "pending" | "paid" | "failed" | "refunded";
       paymentReference?: string;
       paymentTimestamp?: number;
@@ -465,7 +466,8 @@ export const createOrderWithPayment = mutation({
     paymentMethod: v.union(
       v.literal("paystack"),
       v.literal("flutterwave"),
-      v.literal("cod")
+      v.literal("cod"),
+      v.literal("stripe")
     ),
     whatsappOptIn: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),

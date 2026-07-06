@@ -34,7 +34,7 @@ export type BillingCycle = 'monthly' | 'yearly';
 /**
  * Payment providers supported for subscription billing
  */
-export type SubscriptionPaymentProvider = Extract<PaymentMethod, 'paystack' | 'flutterwave'>;
+export type SubscriptionPaymentProvider = Extract<PaymentMethod, 'paystack' | 'flutterwave' | 'stripe'>;
 
 // ============================================================================
 // Subscription Plan Types
@@ -85,6 +85,13 @@ export interface PlanFeatures {
 /**
  * Subscription plan definition
  */
+export interface PlanPrice {
+  /** Monthly price in the plan's currency's major unit. */
+  monthly: number;
+  /** Yearly price (typically 2 months free). */
+  yearly: number;
+}
+
 export interface SubscriptionPlan {
   /** Unique plan identifier */
   id: string;
@@ -92,12 +99,20 @@ export interface SubscriptionPlan {
   name: string;
   /** Plan description */
   description: string;
-  /** Monthly price in Naira */
+  /**
+   * Default monthly price (Naira / NGN) — retained for backward compatibility.
+   * Prefer `pricing` + `getPlanPrice(plan, currency, cycle)` for multi-region.
+   */
   priceMonthly: number;
-  /** Yearly price in Naira (typically discounted) */
+  /** Default yearly price (Naira / NGN) — see note on priceMonthly. */
   priceYearly: number;
-  /** Currency code */
+  /** Default currency code (NGN). */
   currency: string;
+  /**
+   * Per-currency pricing for multi-region billing. When a currency is absent
+   * the NGN `priceMonthly`/`priceYearly` are used as the fallback.
+   */
+  pricing?: Partial<Record<"NGN" | "USD", PlanPrice>>;
   /** Plan limits */
   limits: PlanLimits;
   /** Plan features */

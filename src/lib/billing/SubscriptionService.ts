@@ -25,6 +25,7 @@ import type {
 } from './types';
 import { createPaystackProvider } from '../payment/PaystackProvider';
 import { createFlutterwaveProvider } from '../payment/FlutterwaveProvider';
+import { createStripeProvider } from '../payment/StripeProvider';
 import type { PaymentProvider } from '../payment/types';
 import type { Order } from '@/types/global.d';
 
@@ -46,6 +47,10 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     priceMonthly: 15000, // ₦15,000/month
     priceYearly: 150000, // ₦150,000/year (2 months free)
     currency: 'NGN',
+    pricing: {
+      NGN: { monthly: 15000, yearly: 150000 },
+      USD: { monthly: 49, yearly: 490 }, // $49/mo, 2 months free yearly
+    },
     limits: {
       maxBranches: 1,
       maxCallsPerMonth: 500,
@@ -76,6 +81,10 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     priceMonthly: 35000, // ₦35,000/month
     priceYearly: 350000, // ₦350,000/year (2 months free)
     currency: 'NGN',
+    pricing: {
+      NGN: { monthly: 35000, yearly: 350000 },
+      USD: { monthly: 99, yearly: 990 }, // $99/mo, 2 months free yearly
+    },
     limits: {
       maxBranches: 3,
       maxCallsPerMonth: 2000,
@@ -106,6 +115,10 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     priceMonthly: 75000, // ₦75,000/month
     priceYearly: 750000, // ₦750,000/year (2 months free)
     currency: 'NGN',
+    pricing: {
+      NGN: { monthly: 75000, yearly: 750000 },
+      USD: { monthly: 249, yearly: 2490 }, // $249/mo, 2 months free yearly
+    },
     limits: {
       maxBranches: -1, // Unlimited
       maxCallsPerMonth: -1, // Unlimited
@@ -152,10 +165,29 @@ export function getActivePlans(): SubscriptionPlan[] {
 }
 
 /**
- * Calculate the price for a plan based on billing cycle
+ * Calculate the price for a plan based on billing cycle (default NGN).
+ * Retained for backward compatibility; prefer {@link getPlanPrice} for
+ * multi-region (currency-aware) pricing.
  */
 export function calculatePlanPrice(plan: SubscriptionPlan, billingCycle: BillingCycle): number {
   return billingCycle === 'yearly' ? plan.priceYearly : plan.priceMonthly;
+}
+
+/**
+ * Currency-aware plan price. Falls back to the plan's NGN base price when the
+ * requested currency has no explicit entry, so existing (Nigeria) behavior is
+ * unchanged.
+ */
+export function getPlanPrice(
+  plan: SubscriptionPlan,
+  currency: 'NGN' | 'USD',
+  billingCycle: BillingCycle
+): number {
+  const entry = plan.pricing?.[currency];
+  if (entry) {
+    return billingCycle === 'yearly' ? entry.yearly : entry.monthly;
+  }
+  return calculatePlanPrice(plan, billingCycle);
 }
 
 /**
@@ -231,26 +263,33 @@ export function isWithinLimit(usage: number, limit: number): boolean {
 export class SubscriptionService {
   private paystackProvider: PaymentProvider | null = null;
   private flutterwaveProvider: PaymentProvider | null = null;
+  private stripeProvider: PaymentProvider | null = null;
 
   constructor(
     private readonly callbackUrl?: string
   ) {}
 
   /**
-   * Get the payment provider instance
+   * Get the payment provider instance for a subscription provider. Paystack /
+   * Flutterwave serve Nigeria; Stripe serves the United States.
    */
   private getPaymentProvider(provider: SubscriptionPaymentProvider): PaymentProvider {
+    if (provider === 'stripe') {
+      if (!this.stripeProvider) {
+        this.stripeProvider = createStripeProvider(this.callbackUrl);
+      }
+      return this.stripeProvider;
+    }
     if (provider === 'paystack') {
       if (!this.paystackProvider) {
         this.paystackProvider = createPaystackProvider(this.callbackUrl);
       }
       return this.paystackProvider;
-    } else {
-      if (!this.flutterwaveProvider) {
-        this.flutterwaveProvider = createFlutterwaveProvider(this.callbackUrl);
-      }
-      return this.flutterwaveProvider;
     }
+    if (!this.flutterwaveProvider) {
+      this.flutterwaveProvider = createFlutterwaveProvider(this.callbackUrl);
+    }
+    return this.flutterwaveProvider;
   }
 
   /**
@@ -316,7 +355,9 @@ export class SubscriptionService {
 
     // If not starting with trial, initialize payment
     if (!startTrial) {
-      const price = calculatePlanPrice(plan, billingCycle);
+      // Currency follows the provider: Stripe bills USD, Paystack/Flutterwave NGN.
+      const currency: 'NGN' | 'USD' = paymentProvider === 'stripe' ? 'USD' : 'NGN';
+      const price = getPlanPrice(plan, currency, billingCycle);
       
       try {
         const provider = this.getPaymentProvider(paymentProvider);
@@ -590,7 +631,8 @@ export function createSubscriptionService(callbackUrl?: string): SubscriptionSer
 // ============================================================================
 
 /**
- * Format price in Naira
+ * Format price in Naira. Retained for backward compatibility; prefer
+ * `formatMoney(amount, currency)` from `@/lib/region` for multi-region display.
  */
 export function formatNairaPrice(amount: number): string {
   return `₦${amount.toLocaleString('en-NG')}`;

@@ -31,7 +31,12 @@ export default defineSchema({
         v.literal("french")
       ),
       enabledPaymentMethods: v.array(
-        v.union(v.literal("paystack"), v.literal("flutterwave"), v.literal("cod"))
+        v.union(
+          v.literal("paystack"),
+          v.literal("flutterwave"),
+          v.literal("cod"),
+          v.literal("stripe")
+        )
       ),
       whatsappEnabled: v.boolean(),
       smsEnabled: v.boolean(),
@@ -127,6 +132,11 @@ export default defineSchema({
     ),
     branchCount: v.optional(v.number()), // Count of branches for this restaurant
     createdAt: v.number(),
+
+    // NEW: Country/region for multi-region support (NG | US). Optional for
+    // backward compat; absent is treated as "NG" (DEFAULT_COUNTRY) in app logic.
+    // Drives currency, payment providers, phone format, states, and telecom.
+    country: v.optional(v.union(v.literal("NG"), v.literal("US"))),
 
     // NEW: Vertical classification (Req 1.2)
     vertical: v.optional(verticalValidator), // optional for backward compat; defaults "restaurant" in app logic
@@ -244,7 +254,8 @@ export default defineSchema({
     paymentMethod: v.optional(v.union(
       v.literal("paystack"),
       v.literal("flutterwave"),
-      v.literal("cod")
+      v.literal("cod"),
+      v.literal("stripe")
     )),
     paymentStatus: v.optional(v.union(
       v.literal("pending"),
@@ -364,7 +375,8 @@ export default defineSchema({
     provider: v.union(
       v.literal("paystack"),
       v.literal("flutterwave"),
-      v.literal("whatsapp")
+      v.literal("whatsapp"),
+      v.literal("stripe")
     ),
     eventType: v.string(),
     payload: v.string(),
@@ -597,7 +609,11 @@ export default defineSchema({
     // Optional: a free trial started at onboarding has NO payment provider until
     // the tenant adds one via the dashboard checkout. Existing rows keep theirs.
     paymentProvider: v.optional(
-      v.union(v.literal("paystack"), v.literal("flutterwave"))
+      v.union(
+        v.literal("paystack"),
+        v.literal("flutterwave"),
+        v.literal("stripe")
+      )
     ),
     paymentReference: v.optional(v.string()),
     createdAt: v.number(),
@@ -645,7 +661,8 @@ export default defineSchema({
     ),
     paymentProvider: v.union(
       v.literal("paystack"),
-      v.literal("flutterwave")
+      v.literal("flutterwave"),
+      v.literal("stripe")
     ),
     paymentReference: v.optional(v.string()),
     periodStart: v.number(),

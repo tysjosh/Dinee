@@ -20,7 +20,7 @@ import type { Order } from "@/types/global.d";
  * - flutterwave: Nigerian payment gateway supporting multiple payment methods
  * - cod: Cash-on-delivery payment method
  */
-export type PaymentMethod = 'paystack' | 'flutterwave' | 'cod';
+export type PaymentMethod = 'paystack' | 'flutterwave' | 'cod' | 'stripe';
 
 /**
  * Payment status values for order payment tracking

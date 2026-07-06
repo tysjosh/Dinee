@@ -11,7 +11,12 @@ const platformSettingsValidator = v.object({
     v.literal("french")
   ),
   enabledPaymentMethods: v.array(
-    v.union(v.literal("paystack"), v.literal("flutterwave"), v.literal("cod"))
+    v.union(
+      v.literal("paystack"),
+      v.literal("flutterwave"),
+      v.literal("cod"),
+      v.literal("stripe")
+    )
   ),
   whatsappEnabled: v.boolean(),
   smsEnabled: v.boolean(),
@@ -20,7 +25,7 @@ const platformSettingsValidator = v.object({
 // Type for platform settings
 type PlatformSettings = {
   defaultLanguage: "english" | "nigerian_english" | "pidgin" | "spanish" | "french";
-  enabledPaymentMethods: ("paystack" | "flutterwave" | "cod")[];
+  enabledPaymentMethods: ("paystack" | "flutterwave" | "cod" | "stripe")[];
   whatsappEnabled: boolean;
   smsEnabled: boolean;
 };
@@ -163,7 +168,12 @@ export const updatePlatformSettings = mutation({
     ),
     enabledPaymentMethods: v.optional(
       v.array(
-        v.union(v.literal("paystack"), v.literal("flutterwave"), v.literal("cod"))
+        v.union(
+          v.literal("paystack"),
+          v.literal("flutterwave"),
+          v.literal("cod"),
+          v.literal("stripe")
+        )
       )
     ),
     whatsappEnabled: v.optional(v.boolean()),

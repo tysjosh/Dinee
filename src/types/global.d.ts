@@ -45,8 +45,8 @@ export interface OrderItem {
   specialInstructions?: string;
 }
 
-// Payment types for Nigerian market
-export type PaymentMethod = 'paystack' | 'flutterwave' | 'cod';
+// Payment types (multi-region: Nigeria + United States)
+export type PaymentMethod = 'paystack' | 'flutterwave' | 'cod' | 'stripe';
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 export type DeliveryStatus = 'pending' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'failed';
 
