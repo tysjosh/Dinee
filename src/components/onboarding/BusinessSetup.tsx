@@ -439,6 +439,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
               title="Add New Branch"
               description="Enter the details for this branch location"
               submitButtonText="Add Branch"
+              country={formData.country}
             />
           );
         }
@@ -453,6 +454,7 @@ const BusinessSetup: React.FC<BusinessSetupProps> = ({ onComplete, vertical }) =
               title="Edit Branch"
               description="Update the details for this branch location"
               submitButtonText="Save Changes"
+              country={formData.country}
             />
           );
         }

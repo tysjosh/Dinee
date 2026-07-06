@@ -168,6 +168,9 @@ export class StripeProvider implements PaymentProvider {
           typeof session.metadata?.orderId === "string"
             ? session.metadata.orderId
             : undefined,
+        // The Checkout Session id is the reference we persisted on the
+        // subscription, so the webhook route can activate it.
+        reference: session.id,
         status:
           event.type === "checkout.session.completed"
             ? mapStripeStatus(session.payment_status)

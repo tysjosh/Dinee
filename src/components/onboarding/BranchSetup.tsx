@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { motion } from "motion/react";
+import { getCountryConfig } from "@/lib/region";
 
 /**
  * Operating hours for a single day
@@ -52,6 +53,8 @@ export interface BranchSetupProps {
   description?: string;
   /** Submit button text (defaults to "Save Branch") */
   submitButtonText?: string;
+  /** Tenant country (NG | US) driving phone/address placeholders. Defaults NG. */
+  country?: "NG" | "US";
 }
 
 /**
@@ -110,7 +113,21 @@ const BranchSetup: React.FC<BranchSetupProps> = ({
   title = "Branch Setup",
   description = "Enter the details for this branch location",
   submitButtonText = "Save Branch",
+  country,
 }) => {
+  const countryCfg = getCountryConfig(country);
+  const phonePlaceholder =
+    countryCfg.code === "US"
+      ? "e.g., +1 (415) 555 0123"
+      : "e.g., +234 801 234 5678";
+  const namePlaceholder =
+    countryCfg.code === "US"
+      ? "e.g., Main Branch, Downtown"
+      : "e.g., Main Branch, Victoria Island";
+  const addressPlaceholder =
+    countryCfg.code === "US"
+      ? "Enter the full address (street, city, state, ZIP)"
+      : "Enter the full address of this branch";
   const [formData, setFormData] = useState<BranchData>({
     name: initialData?.name || "",
     address: initialData?.address || "",
@@ -274,7 +291,7 @@ const BranchSetup: React.FC<BranchSetupProps> = ({
               type="text"
               value={formData.name}
               onChange={(e) => handleInputChange("name", e.target.value)}
-              placeholder="e.g., Main Branch, Victoria Island"
+              placeholder={namePlaceholder}
               className={`input-dark w-full px-4 py-3 rounded-lg ${
                 errors.name
                   ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
@@ -306,7 +323,7 @@ const BranchSetup: React.FC<BranchSetupProps> = ({
               id="branch-address"
               value={formData.address}
               onChange={(e) => handleInputChange("address", e.target.value)}
-              placeholder="Enter the full address of this branch"
+              placeholder={addressPlaceholder}
               className={`input-dark w-full px-4 py-3 rounded-lg resize-none h-24 ${
                 errors.address
                   ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"
@@ -339,7 +356,7 @@ const BranchSetup: React.FC<BranchSetupProps> = ({
               type="tel"
               value={formData.phoneNumber}
               onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
-              placeholder="e.g., +234 801 234 5678"
+              placeholder={phonePlaceholder}
               className={`input-dark w-full px-4 py-3 rounded-lg ${
                 errors.phoneNumber
                   ? "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50"

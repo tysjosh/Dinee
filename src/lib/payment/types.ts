@@ -77,6 +77,8 @@ export interface WebhookResult {
   orderId?: string;
   /** Payment status indicated by the webhook */
   status?: PaymentStatus;
+  /** Provider payment reference (e.g. Stripe Checkout Session id) if available. */
+  reference?: string;
 }
 
 /**
