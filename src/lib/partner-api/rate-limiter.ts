@@ -188,6 +188,18 @@ class UpstashRateLimiter {
 
 let backend: RateLimiterBackend | null = null;
 
+/**
+ * Whether the per-instance in-memory limiter is acceptable. It is NOT safe for
+ * distributed/serverless production (each instance keeps its own counters, so
+ * the global limit is bypassable by fan-out). We therefore only allow it
+ * outside production, OR when an operator explicitly opts in for a known
+ * single-instance deployment via RATE_LIMIT_ALLOW_INMEMORY=true.
+ */
+function inMemoryFallbackAllowed(): boolean {
+  if (process.env.RATE_LIMIT_ALLOW_INMEMORY === 'true') return true;
+  return process.env.NODE_ENV !== 'production';
+}
+
 function getBackend(): RateLimiterBackend {
   if (backend) return backend;
 
@@ -212,8 +224,24 @@ function getBackend(): RateLimiterBackend {
       backend = new UpstashRateLimiter(ratelimit, DEFAULT_RATE_LIMIT);
       return backend;
     } catch (err) {
+      // Fail closed in production: a distributed limiter that can't initialize
+      // must not silently degrade to unenforceable per-instance limiting.
+      if (!inMemoryFallbackAllowed()) {
+        throw new Error(
+          '[rate-limiter] Upstash rate limiter failed to initialize and in-memory ' +
+          'fallback is disabled in production. Fix UPSTASH_REDIS_REST_URL/TOKEN, or ' +
+          'set RATE_LIMIT_ALLOW_INMEMORY=true only for a single-instance deployment.'
+        );
+      }
       console.warn('[rate-limiter] Failed to initialize Upstash rate limiter, falling back to in-memory:', err);
     }
+  } else if (!inMemoryFallbackAllowed()) {
+    // Misconfiguration in production — fail fast rather than fail open.
+    throw new Error(
+      '[rate-limiter] UPSTASH_REDIS_REST_URL/TOKEN are required in production for ' +
+      'distributed rate limiting. Set them, or set RATE_LIMIT_ALLOW_INMEMORY=true ' +
+      'only for a single-instance deployment.'
+    );
   } else {
     console.warn(
       '[rate-limiter] UPSTASH_REDIS_REST_URL is not set. Using in-memory rate limiter. ' +
