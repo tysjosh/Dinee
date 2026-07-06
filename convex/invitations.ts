@@ -1,11 +1,17 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { generateSecureToken, sha256Hex } from "./tokenHash";
 
 /**
  * Invitation CRUD mutations and queries.
  *
  * Handles team member invitations with role assignment, token generation,
  * expiry enforcement, and authorization checks.
+ *
+ * SECURITY: invite tokens are stored ONLY as their SHA-256 hash (the
+ * `inviteToken` field holds the hash). The raw token is returned to the caller
+ * once — for the invite link — and never persisted, so a DB read cannot yield a
+ * usable token. Lookups hash the incoming raw token and match on the hash.
  *
  * Requirements: 9.1, 9.3, 9.7, 9.8
  */
@@ -17,19 +23,6 @@ const invitationRoleValidator = v.union(
   v.literal("branch_manager"),
   v.literal("supervisor")
 );
-
-/**
- * Generate a unique invite token (32 bytes = 64 hex chars).
- * Uses the same approach as passwordResetTokens.ts.
- */
-function generateInviteToken(): string {
-  const chars = "abcdef0123456789";
-  let token = "";
-  for (let i = 0; i < 64; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
 
 /**
  * Create a new team invitation.
@@ -62,20 +55,22 @@ export const createInvitation = mutation({
     }
 
     const now = Date.now();
-    const inviteToken = generateInviteToken();
+    // Mint a CSPRNG token; store only its hash, return the raw value once.
+    const rawToken = generateSecureToken();
+    const tokenHash = await sha256Hex(rawToken);
 
     const docId = await ctx.db.insert("invitations", {
       email: args.email.toLowerCase().trim(),
       role: args.role,
       tenantId: args.tenantId,
       invitedBy: args.invitedBy,
-      inviteToken,
+      inviteToken: tokenHash,
       status: "pending",
       createdAt: now,
       expiresAt: now + SEVEN_DAYS_MS,
     });
 
-    return { docId, inviteToken };
+    return { docId, inviteToken: rawToken };
   },
 });
 
@@ -89,9 +84,10 @@ export const createInvitation = mutation({
 export const getInvitationByToken = query({
   args: { inviteToken: v.string() },
   handler: async (ctx, args) => {
+    const tokenHash = await sha256Hex(args.inviteToken);
     const invitation = await ctx.db
       .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", args.inviteToken))
+      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
       .first();
 
     if (!invitation) {
@@ -114,9 +110,10 @@ export const getInvitationByToken = query({
 export const acceptInvitation = mutation({
   args: { inviteToken: v.string() },
   handler: async (ctx, args) => {
+    const tokenHash = await sha256Hex(args.inviteToken);
     const invitation = await ctx.db
       .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", args.inviteToken))
+      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
       .first();
 
     if (!invitation) {
@@ -148,9 +145,10 @@ export const acceptInvitation = mutation({
 export const revokeInvitation = mutation({
   args: { inviteToken: v.string() },
   handler: async (ctx, args) => {
+    const tokenHash = await sha256Hex(args.inviteToken);
     const invitation = await ctx.db
       .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", args.inviteToken))
+      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
       .first();
 
     if (!invitation) {
@@ -192,9 +190,10 @@ export const getInvitationsByTenant = query({
 export const resendInvitation = mutation({
   args: { inviteToken: v.string() },
   handler: async (ctx, args) => {
+    const tokenHash = await sha256Hex(args.inviteToken);
     const invitation = await ctx.db
       .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", args.inviteToken))
+      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
       .first();
 
     if (!invitation) {
@@ -205,9 +204,17 @@ export const resendInvitation = mutation({
       throw new Error(`Cannot resend an invitation that is ${invitation.status}`);
     }
 
+    // Rotate the token on resend: the old raw token is unrecoverable (only its
+    // hash is stored), so issue a fresh one, persist its hash, extend expiry,
+    // and return the new raw token for the resent invite link.
+    const newRawToken = generateSecureToken();
+    const newTokenHash = await sha256Hex(newRawToken);
     const newExpiresAt = Date.now() + SEVEN_DAYS_MS;
-    await ctx.db.patch(invitation._id, { expiresAt: newExpiresAt });
+    await ctx.db.patch(invitation._id, {
+      inviteToken: newTokenHash,
+      expiresAt: newExpiresAt,
+    });
 
-    return { success: true, newExpiresAt };
+    return { success: true, newExpiresAt, inviteToken: newRawToken };
   },
 });

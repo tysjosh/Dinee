@@ -13,6 +13,7 @@ import type {
   FilterApi,
   FunctionReference,
 } from "convex/server";
+import type * as ResetOTP from "../ResetOTP.js";
 import type * as apiKeys from "../apiKeys.js";
 import type * as apiUsageLogs from "../apiUsageLogs.js";
 import type * as auth from "../auth.js";
@@ -63,7 +64,6 @@ import type * as monitoringAlerts from "../monitoringAlerts.js";
 import type * as monitoringMetrics from "../monitoringMetrics.js";
 import type * as orders from "../orders.js";
 import type * as partners from "../partners.js";
-import type * as passwordResetTokens from "../passwordResetTokens.js";
 import type * as phoneLookup from "../phoneLookup.js";
 import type * as phoneProvisioning_actions from "../phoneProvisioning/actions.js";
 import type * as phoneProvisioning_mutations from "../phoneProvisioning/mutations.js";
@@ -89,6 +89,7 @@ import type * as shared_phoneProvisioningTypes from "../shared/phoneProvisioning
 import type * as shared_validators from "../shared/validators.js";
 import type * as signup from "../signup.js";
 import type * as subscriptions from "../subscriptions.js";
+import type * as tokenHash from "../tokenHash.js";
 import type * as users from "../users.js";
 import type * as webhookDeliveries from "../webhookDeliveries.js";
 import type * as webhookEvents from "../webhookEvents.js";
@@ -103,6 +104,7 @@ import type * as webhookSubscriptions from "../webhookSubscriptions.js";
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  ResetOTP: typeof ResetOTP;
   apiKeys: typeof apiKeys;
   apiUsageLogs: typeof apiUsageLogs;
   auth: typeof auth;
@@ -153,7 +155,6 @@ declare const fullApi: ApiFromModules<{
   monitoringMetrics: typeof monitoringMetrics;
   orders: typeof orders;
   partners: typeof partners;
-  passwordResetTokens: typeof passwordResetTokens;
   phoneLookup: typeof phoneLookup;
   "phoneProvisioning/actions": typeof phoneProvisioning_actions;
   "phoneProvisioning/mutations": typeof phoneProvisioning_mutations;
@@ -179,6 +180,7 @@ declare const fullApi: ApiFromModules<{
   "shared/validators": typeof shared_validators;
   signup: typeof signup;
   subscriptions: typeof subscriptions;
+  tokenHash: typeof tokenHash;
   users: typeof users;
   webhookDeliveries: typeof webhookDeliveries;
   webhookEvents: typeof webhookEvents;

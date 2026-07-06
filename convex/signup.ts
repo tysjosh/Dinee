@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { verticalValidator } from "./shared/validators";
+import { generateSecureToken } from "./tokenHash";
 
 /**
  * Self-serve signup mutations
@@ -366,7 +367,8 @@ export const createBusinessOwner = mutation({
               apiKeyLast4: args.integrationConfig.apiKey.slice(-4),
               tenantMapping: args.integrationConfig.tenantMapping,
               webhookUrl: `/api/v1/integrations/runsheet/webhook/${restaurantId}`,
-              webhookSecret: generateUserId() + generateUserId(), // Random secret
+              // CSPRNG secret (32 bytes hex) — never Math.random for secrets.
+              webhookSecret: generateSecureToken(),
               status: "connected" as const,
               failureCount: 0,
               lastSyncAt: now,

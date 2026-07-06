@@ -1,21 +1,25 @@
 "use client";
 
 import React, { useState } from "react";
-import { useMutation } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
+import { useRouter } from "next/navigation";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { MinimalHeader } from "@/components/ui/Header";
 import Link from "next/link";
 
 /**
  * Forgot Password page at /client/forgot-password
  *
- * Renders an email input form. On submit, generates a password reset token
- * and shows a generic success message (never reveals whether the email exists).
+ * Renders an email input form. On submit it triggers Convex Auth's password
+ * reset flow (`flow: "reset"`), which issues a one-time code via the ResetOTP
+ * provider, then forwards the user to /client/reset-password to enter the code
+ * and a new password. Shows a generic success message and never reveals whether
+ * the email exists.
  *
  * Requirements: 5.1, 5.2, 5.6
  */
 export default function ForgotPasswordPage() {
-  const createResetToken = useMutation(api.passwordResetTokens.createResetToken);
+  const router = useRouter();
+  const { signIn } = useAuthActions();
 
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
@@ -39,19 +43,20 @@ export default function ForgotPasswordPage() {
     setIsSubmitting(true);
 
     try {
-      // Generate reset token — the mutation always succeeds regardless of
-      // whether the email exists, so we never leak account existence.
-      const { rawToken } = await createResetToken({ email: trimmed });
-
-      // In production this would send an email with the reset link.
-      // For now we log it so developers can test the flow.
-      console.info(
-        `[Password Reset] Link: /client/reset-password?token=${rawToken}`
-      );
-
+      // Trigger Convex Auth's reset flow — issues an OTP via ResetOTP. This
+      // resolves on both existing and unknown emails so account existence is
+      // never leaked.
+      await signIn("password", { email: trimmed, flow: "reset" });
       setSubmitted(true);
+      // Forward to the code-entry page, prefilling the email.
+      setTimeout(() => {
+        router.push(
+          `/client/reset-password?email=${encodeURIComponent(trimmed)}`
+        );
+      }, 1200);
     } catch {
-      setError("Something went wrong. Please try again.");
+      // Still show the generic success state to avoid leaking account existence.
+      setSubmitted(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -85,8 +90,9 @@ export default function ForgotPasswordPage() {
                 </div>
                 <h1 className="text-2xl font-bold text-white">Check your email</h1>
                 <p className="text-white/50 mt-3 text-sm leading-relaxed">
-                  If an account exists with that email, we&apos;ve sent a password
-                  reset link. The link expires in 1 hour.
+                  If an account exists with that email, we&apos;ve sent a 6-digit
+                  reset code. It expires in 15 minutes. Taking you to enter it
+                  now&hellip;
                 </p>
                 <Link
                   href="/client/login"
