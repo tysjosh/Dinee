@@ -269,9 +269,10 @@ export const getUsersByTenant = query({
 export const getAllUsers = query({
   args: {},
   handler: async (ctx) => {
-    // Platform-wide read — admins only.
+    // Platform-wide read — admins only. Bounded to the newest 1000 as a safety
+    // net against unbounded reads; full pagination is a follow-up if needed.
     await requirePlatformAdmin(ctx);
-    const users = await ctx.db.query("users").collect();
+    const users = await ctx.db.query("users").order("desc").take(1000);
     return users;
   },
 });

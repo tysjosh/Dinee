@@ -125,9 +125,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
       );
     }
     
-    // Get orders
+    // Get orders. This route filters (date/status/branch) and paginates in
+    // memory, so request the query's max bound rather than the smaller default.
+    // NOTE: results are still capped at the newest 1000 orders — proper
+    // server-side date-filtered cursor pagination is a tracked follow-up for
+    // restaurants whose history exceeds that.
     const orders = await convexClient.query(api.orders.getOrdersByRestaurant, {
       restaurantId,
+      limit: 1000,
     });
     
     // Define order type for filtering

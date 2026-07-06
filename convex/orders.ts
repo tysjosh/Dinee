@@ -77,29 +77,44 @@ export const updatePaymentStatus = mutation({
   },
 });
 
-// Get all orders for a restaurant
+// Bounded default for "all orders" reads. These tables grow with every order
+// ever placed, so an unbounded `.collect()` eventually hits Convex read limits
+// and heavy payloads. We cap to the newest N (desc) by default; callers may
+// request more up to MAX_ORDER_QUERY_LIMIT. Cursor-based pagination is the
+// longer-term follow-up for true history browsing.
+const DEFAULT_ORDER_QUERY_LIMIT = 500;
+const MAX_ORDER_QUERY_LIMIT = 1000;
+
+function clampOrderLimit(limit?: number): number {
+  if (limit == null || Number.isNaN(limit) || limit <= 0) {
+    return DEFAULT_ORDER_QUERY_LIMIT;
+  }
+  return Math.min(Math.floor(limit), MAX_ORDER_QUERY_LIMIT);
+}
+
+// Get orders for a restaurant (newest first, bounded).
 export const getOrdersByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .order("desc")
-      .collect();
+      .take(clampOrderLimit(args.limit));
 
     return orders;
   },
 });
 
-// Get all orders for a branch
+// Get orders for a branch (newest first, bounded).
 export const getOrdersByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .order("desc")
-      .collect();
+      .take(clampOrderLimit(args.limit));
 
     return orders;
   },

@@ -73,6 +73,8 @@ export const getRestaurant = query({
 });
 
 // Get all restaurants (admin panel). Platform-wide read — admins only.
+// Bounded to the newest 1000 as a safety net against unbounded reads; full
+// cursor pagination is a follow-up if a platform exceeds this.
 export const getAllRestaurants = query({
   args: {},
   handler: async (ctx) => {
@@ -81,7 +83,7 @@ export const getAllRestaurants = query({
     const restaurants = await ctx.db
       .query("restaurants")
       .order("desc")
-      .collect();
+      .take(1000);
 
     return restaurants;
   },
