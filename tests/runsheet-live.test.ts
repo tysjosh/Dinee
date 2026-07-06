@@ -22,7 +22,20 @@ import {
   type VoiceIntakePayload,
 } from "../src/lib/integrations/runsheet/voiceIntakeClient";
 
-dotenv.config({ path: ".env.local" });
+// This is a manual live-integration harness — it hits a running Runsheet
+// backend and reads local/live credentials. It must NOT run as part of the
+// default `npm test` suite (which should be hermetic). It self-skips unless
+// RUNSHEET_LIVE is explicitly set, e.g.:
+//
+//   RUNSHEET_LIVE=1 npx vitest run tests/runsheet-live.test.ts
+//
+const LIVE = process.env.RUNSHEET_LIVE === "1";
+
+// Only load .env.local when actually running the live harness, so ordinary
+// test runs never pull local operational credentials into the process env.
+if (LIVE) {
+  dotenv.config({ path: ".env.local" });
+}
 
 const BASE = process.env.RUNSHEET_TEST_BASE_URL || "http://localhost:8080";
 const API_KEY = process.env.RUNSHEET_TEST_API_KEY || "";
@@ -47,7 +60,7 @@ async function run<T>(label: string, fn: () => Promise<T>) {
   }
 }
 
-it("runsheet live api", async () => {
+it.skipIf(!LIVE)("runsheet live api", async () => {
   console.log("\n--- Runsheet live test ---");
   console.log(
     "baseUrl:", BASE, "| apiKey:", mask(API_KEY), "| tenant:", TENANT || "(empty)", "| secret:", mask(SECRET),

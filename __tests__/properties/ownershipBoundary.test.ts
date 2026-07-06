@@ -37,15 +37,23 @@ const intakeClientPath = path.join(
   "runsheet",
   "voiceIntakeClient.ts"
 );
-const adminPagePath = path.join(
+// The Runsheet-specific admin page was retired to a redirect; Auto_Submit is
+// now an admin-configurable typed config field on the Runsheet platform
+// definition, rendered by the generic platform integration admin.
+const runsheetPlatformPath = path.join(
   repoRoot,
   "src",
-  "app",
-  "client",
-  "dashboard",
+  "lib",
   "integrations",
   "runsheet",
-  "page.tsx"
+  "platform.ts"
+);
+const platformAdminPath = path.join(
+  repoRoot,
+  "src",
+  "components",
+  "dashboard",
+  "PlatformIntegrationAdmin.tsx"
 );
 const appDir = path.join(repoRoot, "src", "app");
 
@@ -224,25 +232,37 @@ describe("Ownership boundary — no Dinee review-queue page (Req 12.8)", () => {
 // SHOULD now be present and wired to an interactive, accessible control.
 
 describe("Ownership boundary — Auto_Submit toggle is surfaced (Req 9.3)", () => {
-  it("the Runsheet admin page renders an accessible Auto_Submit enable/disable control", () => {
-    expect(existsSync(adminPagePath)).toBe(true);
-    const source = readFileSync(adminPagePath, "utf8");
+  it("the Runsheet platform definition declares an admin-configurable Auto_Submit control", () => {
+    expect(existsSync(runsheetPlatformPath)).toBe(true);
+    const source = readFileSync(runsheetPlatformPath, "utf8");
 
-    // Req 9.3: Auto_Submit is now admin-configurable, so `autoSubmitEnabled` is
-    // held in component state and wired to a state setter.
-    expect(source).toMatch(/setAutoSubmitEnabled/);
+    // Req 9.3: Auto_Submit is admin-configurable — the platform declares an
+    // `autoSubmitEnabled` config field so it renders as a first-class setting
+    // rather than being hidden in a raw JSON blob.
     expect(source).toMatch(/autoSubmitEnabled/);
 
-    // The toggle must be an interactive, accessible control: a line that both
-    // references autoSubmitEnabled AND binds an interactive handler / checked
-    // binding (onChange, checked=, role="switch", or type="checkbox").
-    const interactiveAutoSubmit = source
+    // The field must be part of the typed configFields schema and be a boolean
+    // (i.e. an enable/disable control), so the admin renders it as a toggle.
+    expect(source).toMatch(/configFields/);
+    const autoSubmitBlock = source
+      .slice(source.indexOf("autoSubmitEnabled"))
+      .slice(0, 200);
+    expect(autoSubmitBlock).toMatch(/type:\s*["']boolean["']/);
+  });
+
+  it("the generic platform admin renders boolean config fields as accessible interactive controls", () => {
+    expect(existsSync(platformAdminPath)).toBe(true);
+    const source = readFileSync(platformAdminPath, "utf8");
+
+    // Boolean config fields (like Auto_Submit) render as an accessible switch:
+    // a checkbox with role="switch" wired to an onChange handler.
+    const interactiveBoolean = source
       .split("\n")
-      .filter(
-        (line) =>
-          /autoSubmit/i.test(line) &&
-          /(onChange|onClick|checked\s*=|role="switch"|type="checkbox")/.test(line)
+      .filter((line) =>
+        /(type="checkbox"|role="switch"|checked=|onChange)/.test(line)
       );
-    expect(interactiveAutoSubmit.length).toBeGreaterThan(0);
+    expect(interactiveBoolean.length).toBeGreaterThan(0);
+    expect(source).toMatch(/type="checkbox"/);
+    expect(source).toMatch(/role="switch"/);
   });
 });
