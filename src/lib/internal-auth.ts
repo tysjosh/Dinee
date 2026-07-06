@@ -41,3 +41,17 @@ export function validateInternalApiKey(request: NextRequest): InternalAuthResult
 
   return { valid: true };
 }
+
+/**
+ * The secret to forward to the "internal" Convex functions so they can enforce
+ * their own caller check (defense-in-depth against direct Convex access that
+ * bypasses this Next-layer x-api-key gate).
+ *
+ * Returns an empty object when INTERNAL_API_KEY is unset (local dev), matching
+ * the Convex-side guard which allows unauthenticated calls only when the secret
+ * is not configured.
+ */
+export function internalSecretArg(): { internalSecret?: string } {
+  const key = process.env.INTERNAL_API_KEY;
+  return key ? { internalSecret: key } : {};
+}

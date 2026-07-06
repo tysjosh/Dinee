@@ -2,7 +2,7 @@
 import { api } from "../../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
 import { NextRequest, NextResponse } from "next/server";
-import { validateInternalApiKey } from "@/lib/internal-auth";
+import { validateInternalApiKey, internalSecretArg } from "@/lib/internal-auth";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Validate API key for internal routes
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const convexClient = new ConvexHttpClient(convexUrl);
-    const convexResponse = await convexClient.query(api.internal.getRestaurantAndMenuDetailsUsingId, { restaurantId: id });
+    const convexResponse = await convexClient.query(api.internal.getRestaurantAndMenuDetailsUsingId, { restaurantId: id, ...internalSecretArg() });
     
     return new Response(JSON.stringify(convexResponse), {
       status: 200,

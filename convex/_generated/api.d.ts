@@ -85,6 +85,7 @@ import type * as runsheet_integrationsData from "../runsheet/integrationsData.js
 import type * as runsheet_numberAssignments from "../runsheet/numberAssignments.js";
 import type * as runsheet_transcripts from "../runsheet/transcripts.js";
 import type * as runsheetWebhook from "../runsheetWebhook.js";
+import type * as shared_internalAuth from "../shared/internalAuth.js";
 import type * as shared_phoneProvisioningTypes from "../shared/phoneProvisioningTypes.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as signup from "../signup.js";
@@ -176,6 +177,7 @@ declare const fullApi: ApiFromModules<{
   "runsheet/numberAssignments": typeof runsheet_numberAssignments;
   "runsheet/transcripts": typeof runsheet_transcripts;
   runsheetWebhook: typeof runsheetWebhook;
+  "shared/internalAuth": typeof shared_internalAuth;
   "shared/phoneProvisioningTypes": typeof shared_phoneProvisioningTypes;
   "shared/validators": typeof shared_validators;
   signup: typeof signup;

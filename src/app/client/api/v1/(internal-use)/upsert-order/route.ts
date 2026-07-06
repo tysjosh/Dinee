@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Doc } from "convex/_generated/dataModel";
 import { api } from "../../../../../../../convex/_generated/api";
 import { ConvexHttpClient } from "convex/browser";
-import { validateInternalApiKey } from "@/lib/internal-auth";
+import { validateInternalApiKey, internalSecretArg } from "@/lib/internal-auth";
 
 export async function POST(request: NextRequest) {
   // Validate API key for internal routes
@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
   try {
     const convexClient = new ConvexHttpClient(convexUrl);
     const convexResponse = await convexClient.mutation(api.internal.upsertOrders, {
-      data: body
+      data: body,
+      ...internalSecretArg(),
     });
     
     return new Response(JSON.stringify(convexResponse), {

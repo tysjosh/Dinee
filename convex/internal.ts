@@ -7,6 +7,7 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
 import { conversationTypeValidator } from "./shared/validators";
+import { assertInternalCaller } from "./shared/internalAuth";
 
 /** Generate a simple unique billing event ID */
 function generateBillingEventId(prefix: string): string {
@@ -15,8 +16,12 @@ function generateBillingEventId(prefix: string): string {
 
 
 export const getRestaurantAndMenuDetailsUsingId = query({
-  args: { restaurantId: v.string() },
+  args: {
+    restaurantId: v.string(),
+    internalSecret: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     try {
       console.log("🏃 Getting restaurant details")
       const restaurantDetails = await ctx.db
@@ -88,6 +93,7 @@ export const getRestaurantAndMenuDetailsUsingId = query({
 
 export const upsertCallData = mutation({
   args: {
+    internalSecret: v.optional(v.string()),
     data: v.object({
       callId: v.string(),
       restaurantId: v.optional(v.string()),
@@ -105,6 +111,7 @@ export const upsertCallData = mutation({
     })
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     try {
       const {
         callId
@@ -206,6 +213,7 @@ export const upsertCallData = mutation({
 // Adds dialogues to the `transcript` table
 export const addTranscript = mutation({
   args: {
+    internalSecret: v.optional(v.string()),
     data: v.object({
       callId: v.string(),
       dialogue: v.string(),
@@ -215,6 +223,7 @@ export const addTranscript = mutation({
     })
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     try {
       await ctx.db.insert("transcripts", { ...args.data })
       return { success: true, message: "Dialogue added" }
@@ -231,6 +240,7 @@ export const addTranscript = mutation({
 
 export const upsertOrders = mutation({
   args: {
+    internalSecret: v.optional(v.string()),
     data: v.object({
       orderId: v.string(),
       publicOrderCode: v.optional(v.string()),
@@ -259,6 +269,7 @@ export const upsertOrders = mutation({
     })
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     try {
       const {
         orderId
