@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Order } from "@/types/global";
 import { Modal } from "@/components/ui/Modal";
+import { useCurrency } from "@/hooks/useCurrency";
 import { Banknote, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 
 export interface CODPaymentModalProps {
@@ -78,12 +79,8 @@ const CODPaymentModal: React.FC<CODPaymentModalProps> = ({
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-NG", {
-      style: "currency",
-      currency: "NGN",
-    }).format(amount);
-  };
+  // Currency follows the tenant's country (US → USD, NG → NGN).
+  const { format: formatCurrency } = useCurrency();
 
   const isReasonValid = failureReason.trim().length >= CHARS_COUNT;
   const characterCount = failureReason.trim().length;

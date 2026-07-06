@@ -8,6 +8,7 @@ import CODPaymentModal from "./CODPaymentModal";
 import WhatsAppOptInModal from "./WhatsAppOptInModal";
 import DeliveryStatusModal from "./DeliveryStatusModal";
 import { useOrders } from "@/contexts";
+import { useCurrency } from "@/hooks/useCurrency";
 import { useMutation, useConvex } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import {
@@ -171,12 +172,8 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
     setExpandedOrders(newExpanded);
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-NG", {
-      style: "currency",
-      currency: "NGN",
-    }).format(amount);
-  };
+  // Currency follows the tenant's country (US → USD, NG → NGN).
+  const { format: formatCurrency } = useCurrency();
 
   const formatOrderTime = (timestamp: Date) => {
     return timestamp.toLocaleString("en-US", {

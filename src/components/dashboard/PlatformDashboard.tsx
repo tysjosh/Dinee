@@ -27,6 +27,8 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCurrency } from '@/hooks/useCurrency';
+import { formatMoney, type CurrencyCode } from '@/lib/region';
 import {
   AnalyticsService,
   createAnalyticsService,
@@ -80,6 +82,7 @@ function MetricCard({
   icon: Icon,
   format = 'number',
   iconColor = 'text-white/60',
+  currency = 'NGN',
 }: {
   title: string;
   value: number;
@@ -87,11 +90,12 @@ function MetricCard({
   icon: React.ElementType;
   format?: 'number' | 'currency' | 'percentage' | 'duration';
   iconColor?: string;
+  currency?: CurrencyCode;
 }) {
   const formattedValue = useMemo(() => {
     switch (format) {
       case 'currency':
-        return `₦${value.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+        return formatMoney(value, currency);
       case 'percentage':
         return `${value.toFixed(1)}%`;
       case 'duration':
@@ -101,7 +105,7 @@ function MetricCard({
       default:
         return value.toLocaleString();
     }
-  }, [value, format]);
+  }, [value, format, currency]);
 
   const isPositive = change !== undefined && change > 0;
   const isNegative = change !== undefined && change < 0;
@@ -238,6 +242,9 @@ export function PlatformDashboard({
     period: 'last7days',
   });
   const [showFilters, setShowFilters] = useState(false);
+
+  // Revenue metrics follow the tenant's currency (US → USD, NG → NGN).
+  const { currency } = useCurrency();
 
   const analyticsService = useMemo(() => createAnalyticsService(), []);
 
@@ -401,6 +408,7 @@ export function PlatformDashboard({
           change={metrics.changes.totalRevenue}
           icon={DollarSign}
           format="currency"
+          currency={currency}
           iconColor="text-emerald-400"
         />
         
@@ -410,6 +418,7 @@ export function PlatformDashboard({
           change={metrics.changes.averageOrderValue}
           icon={DollarSign}
           format="currency"
+          currency={currency}
           iconColor="text-yellow-400"
         />
         

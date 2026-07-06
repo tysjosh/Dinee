@@ -24,6 +24,8 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCurrency } from '@/hooks/useCurrency';
+import { formatMoney, type CurrencyCode } from '@/lib/region';
 
 // ============================================================================
 // Types
@@ -70,15 +72,10 @@ export interface CODReconciliationSummaryProps {
 // ============================================================================
 
 /**
- * Format currency in Nigerian Naira
+ * Format currency in the tenant's currency (US → USD, NG → NGN).
  */
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+function formatCurrency(amount: number, currency: CurrencyCode = 'NGN'): string {
+  return formatMoney(amount, currency);
 }
 
 /**
@@ -172,7 +169,7 @@ function StatCard({
 /**
  * Collection item row
  */
-function CollectionRow({ collection }: { collection: CODCollection }) {
+function CollectionRow({ collection, currency }: { collection: CODCollection; currency: CurrencyCode }) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
       <div className="flex items-center gap-3">
@@ -190,7 +187,7 @@ function CollectionRow({ collection }: { collection: CODCollection }) {
       </div>
       <div className="text-right">
         <p className="text-sm font-semibold text-emerald-400">
-          {formatCurrency(collection.amount)}
+          {formatCurrency(collection.amount, currency)}
         </p>
         <p className="text-xs text-white/40">
           {collection.collectedBy}
@@ -250,6 +247,9 @@ export function CODReconciliationSummary({
   selectedDate,
 }: CODReconciliationSummaryProps) {
   const [showCollections, setShowCollections] = useState(true);
+
+  // Amounts follow the tenant's currency (US → USD, NG → NGN).
+  const { currency } = useCurrency();
 
   // Get today's date as default
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -314,21 +314,21 @@ export function CODReconciliationSummary({
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard
                 title="Total Collected"
-                value={formatCurrency(data.totalCollected)}
+                value={formatCurrency(data.totalCollected, currency)}
                 subValue={`${data.paidOrderCount} orders`}
                 icon={TrendingUp}
                 variant="success"
               />
               <StatCard
                 title="Pending Collection"
-                value={formatCurrency(data.pendingAmount)}
+                value={formatCurrency(data.pendingAmount, currency)}
                 subValue={`${data.pendingOrders} orders`}
                 icon={Clock}
                 variant="warning"
               />
               <StatCard
                 title="Failed Collections"
-                value={formatCurrency(data.failedAmount)}
+                value={formatCurrency(data.failedAmount, currency)}
                 subValue={`${data.failedOrders} orders`}
                 icon={AlertTriangle}
                 variant={data.failedOrders > 0 ? 'danger' : 'default'}
@@ -388,6 +388,7 @@ export function CODReconciliationSummary({
                       <CollectionRow
                         key={collection.orderId}
                         collection={collection}
+                        currency={currency}
                       />
                     ))}
                   </div>

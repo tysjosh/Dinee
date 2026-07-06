@@ -34,6 +34,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { useCurrency } from '@/hooks/useCurrency';
+import { formatMoney, type CurrencyCode } from '@/lib/region';
 import { Modal } from '@/components/ui/Modal';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import Badge from '@/components/ui/Badge';
@@ -105,7 +107,7 @@ const TRIGGER_CONDITIONS: Array<{
     description: 'Trigger when order total is below a threshold',
     icon: ShoppingCart,
     placeholder: '5000',
-    helpText: 'Enter amount in Naira (e.g., 5000 for ₦5,000)',
+    helpText: 'Enter the order total threshold (e.g., 5000)',
   },
   {
     value: 'item_category',
@@ -210,10 +212,14 @@ const DEFAULT_FORM_DATA: PromptFormData = {
 /**
  * Format trigger value for display
  */
-function formatTriggerValue(condition: TriggerCondition, value: string): string {
+function formatTriggerValue(
+  condition: TriggerCondition,
+  value: string,
+  currency: CurrencyCode = 'NGN'
+): string {
   switch (condition) {
     case 'order_total_below':
-      return `Below ₦${Number(value).toLocaleString()}`;
+      return `Below ${formatMoney(Number(value), currency)}`;
     case 'item_category':
       return value.split(',').map(c => c.trim()).join(', ');
     case 'time_of_day': {
@@ -354,6 +360,7 @@ function PromptCard({
   onToggle,
   onDelete,
   isToggling,
+  currency = 'NGN',
 }: {
   prompt: Prompt;
   branchName?: string;
@@ -361,6 +368,7 @@ function PromptCard({
   onToggle: () => void;
   onDelete: () => void;
   isToggling: boolean;
+  currency?: CurrencyCode;
 }) {
   const triggerInfo = getTriggerInfo(prompt.triggerCondition);
   
@@ -385,7 +393,7 @@ function PromptCard({
           <div className="flex items-center gap-4 text-xs text-white/40">
             <span className="flex items-center gap-1">
               <triggerInfo.icon size={12} />
-              {formatTriggerValue(prompt.triggerCondition, prompt.triggerValue)}
+              {formatTriggerValue(prompt.triggerCondition, prompt.triggerValue, currency)}
             </span>
             <span>Created {formatDate(prompt.createdAt)}</span>
           </div>
@@ -616,6 +624,9 @@ export function PromptManagement({
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [togglingPromptId, setTogglingPromptId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Trigger thresholds are money; format them in the tenant's currency.
+  const { currency } = useCurrency();
 
   // Convex queries and mutations
   const prompts = useQuery(api.prompts.getPromptsByRestaurant, { restaurantId });
@@ -932,6 +943,7 @@ export function PromptManagement({
               onToggle={() => handleToggle(prompt as Prompt)}
               onDelete={() => setDeletingPrompt(prompt as Prompt)}
               isToggling={togglingPromptId === prompt.promptId}
+              currency={currency}
             />
           ))
         )}

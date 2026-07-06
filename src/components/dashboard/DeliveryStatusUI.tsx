@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Badge from '@/components/ui/Badge';
+import { useCurrency } from '@/hooks/useCurrency';
+import { formatMoney, type CurrencyCode } from '@/lib/region';
 import type { Order, DeliveryStatus } from '@/types/global';
 import type { BranchDeliveryMetrics } from '@/lib/delivery/types';
 
@@ -172,13 +174,10 @@ function formatDeliveryTime(minutes: number): string {
 }
 
 /**
- * Format currency in Naira
+ * Format currency in the tenant's currency (US → USD, NG → NGN).
  */
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-  }).format(amount);
+function formatCurrency(amount: number, currency: CurrencyCode = 'NGN'): string {
+  return formatMoney(amount, currency);
 }
 
 /**
@@ -312,10 +311,12 @@ function OrderCard({
   order,
   statusConfig,
   onClick,
+  currency = 'NGN',
 }: {
   order: Order;
   statusConfig: StatusConfig;
   onClick?: (order: Order) => void;
+  currency?: CurrencyCode;
 }) {
   return (
     <div
@@ -341,7 +342,7 @@ function OrderCard({
         <div className="flex items-center justify-between text-sm">
           <span className="text-white/60">Amount</span>
           <span className="text-white font-medium">
-            {formatCurrency(order.totalAmount)}
+            {formatCurrency(order.totalAmount, currency)}
           </span>
         </div>
 
@@ -395,11 +396,13 @@ function StatusGroup({
   orders,
   onOrderClick,
   isExpanded = true,
+  currency = 'NGN',
 }: {
   status: DeliveryStatus;
   orders: Order[];
   onOrderClick?: (order: Order) => void;
   isExpanded?: boolean;
+  currency?: CurrencyCode;
 }) {
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
@@ -444,6 +447,7 @@ function StatusGroup({
                 order={order}
                 statusConfig={config}
                 onClick={onOrderClick}
+                currency={currency}
               />
             ))}
           </div>
@@ -509,6 +513,9 @@ export function DeliveryStatusUI({
   onOrderClick,
   showMetrics = true,
 }: DeliveryStatusUIProps) {
+  // Order amounts follow the tenant's currency (US → USD, NG → NGN).
+  const { currency } = useCurrency();
+
   // Group orders by delivery status
   const groupedOrders = useMemo(() => groupOrdersByStatus(orders), [orders]);
 
@@ -562,6 +569,7 @@ export function DeliveryStatusUI({
             status={status}
             orders={groupedOrders[status]}
             onOrderClick={onOrderClick}
+            currency={currency}
           />
         ))}
       </div>

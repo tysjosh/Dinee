@@ -37,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { useCurrency } from '@/hooks/useCurrency';
 
 // ============================================================================
 // Types
@@ -137,13 +138,6 @@ function getDateRange(period: TimePeriod): { startDate: number; endDate: number 
     default:
       return { startDate: 0, endDate: now.getTime() };
   }
-}
-
-/**
- * Format currency in Naira
- */
-function formatNaira(amount: number): string {
-  return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 /**
@@ -407,6 +401,7 @@ function PromptComparisonRow({
   prompt,
   rank,
   isBestPerformer,
+  formatCurrency,
 }: {
   prompt: {
     promptId: string;
@@ -426,6 +421,7 @@ function PromptComparisonRow({
   };
   rank: number;
   isBestPerformer: boolean;
+  formatCurrency: (amount: number) => string;
 }) {
   const triggerCondition = prompt.triggerCondition as TriggerCondition;
   const Icon = TRIGGER_ICONS[triggerCondition] || Tag;
@@ -495,12 +491,12 @@ function PromptComparisonRow({
       </td>
       <td className="p-4 text-right">
         <span className="text-sm font-medium text-white">
-          {formatNaira(prompt.metrics.totalRevenue)}
+          {formatCurrency(prompt.metrics.totalRevenue)}
         </span>
       </td>
       <td className="p-4 text-right">
         <span className="text-sm text-white/60">
-          {formatNaira(prompt.metrics.avgOrderValue)}
+          {formatCurrency(prompt.metrics.avgOrderValue)}
         </span>
       </td>
     </tr>
@@ -534,6 +530,9 @@ export function UpsellAnalytics({
   const [showFilters, setShowFilters] = useState(false);
   const [sortField, setSortField] = useState<SortField>('acceptanceRate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Revenue figures follow the tenant's currency (US → USD, NG → NGN).
+  const { format: formatCurrency } = useCurrency();
 
   // Calculate date range from period
   const dateRange = useMemo(() => getDateRange(filters.period), [filters.period]);
@@ -759,19 +758,19 @@ export function UpsellAnalytics({
         />
         <MetricCard
           title="Upsell Revenue"
-          value={formatNaira(revenueAttribution?.summary.upsellRevenue || 0)}
+          value={formatCurrency(revenueAttribution?.summary.upsellRevenue || 0)}
           icon={DollarSign}
           iconColor="text-amber-400"
           subtitle={`${(revenueAttribution?.summary.upsellRevenuePercentage || 0).toFixed(1)}% of total`}
         />
         <MetricCard
           title="Avg Order (w/ Upsell)"
-          value={formatNaira(revenueAttribution?.summary.avgOrderValueWithUpsell || 0)}
+          value={formatCurrency(revenueAttribution?.summary.avgOrderValueWithUpsell || 0)}
           icon={TrendingUp}
           iconColor="text-emerald-400"
           trend={revenueAttribution?.summary.upsellImpact && revenueAttribution.summary.upsellImpact > 0 ? 'up' : 'neutral'}
           trendLabel={revenueAttribution?.summary.upsellImpact 
-            ? `+${formatNaira(revenueAttribution.summary.upsellImpact)} vs without`
+            ? `+${formatCurrency(revenueAttribution.summary.upsellImpact)} vs without`
             : undefined}
         />
         <MetricCard
@@ -885,6 +884,7 @@ export function UpsellAnalytics({
                     prompt={prompt}
                     rank={index + 1}
                     isBestPerformer={abTestComparison?.bestPerformer?.promptId === prompt.promptId}
+                    formatCurrency={formatCurrency}
                   />
                 ))}
               </tbody>
@@ -960,10 +960,10 @@ export function UpsellAnalytics({
                         <span className="text-sm font-medium text-emerald-400">{item.acceptedCount}</span>
                       </td>
                       <td className="p-4 text-right">
-                        <span className="text-sm font-medium text-white">{formatNaira(item.totalRevenue)}</span>
+                        <span className="text-sm font-medium text-white">{formatCurrency(item.totalRevenue)}</span>
                       </td>
                       <td className="p-4 text-right">
-                        <span className="text-sm text-white/60">{formatNaira(item.avgOrderValue)}</span>
+                        <span className="text-sm text-white/60">{formatCurrency(item.avgOrderValue)}</span>
                       </td>
                     </tr>
                   );

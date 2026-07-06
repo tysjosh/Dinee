@@ -4,6 +4,8 @@ import React, { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Vertical } from "@/lib/modules/types";
+import { useCurrency } from "@/hooks/useCurrency";
+import { formatMoney, type CurrencyCode } from "@/lib/region";
 
 interface KpiSnapshot {
   snapshotId: string;
@@ -58,12 +60,12 @@ const TIME_RANGES = [
 
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
 
-function formatMetricValue(metricName: string, value: number): string {
+function formatMetricValue(metricName: string, value: number, currency: CurrencyCode): string {
   if (metricName === "call_to_outcome_conversion" || metricName === "integration_attach_rate" || metricName === "churn_rate") {
     return `${(value * 100).toFixed(1)}%`;
   }
   if (metricName === "arpa") {
-    return `₦${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    return formatMoney(value, currency);
   }
   if (metricName === "call_minutes") {
     return `${value.toFixed(1)} min`;
@@ -81,6 +83,9 @@ function computeDelta(current: number, previous: number): { delta: number; label
 const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots: propSnapshots }) => {
   const [selectedVertical, setSelectedVertical] = useState<Vertical | "all">("all");
   const [selectedRange, setSelectedRange] = useState<TimeRange>(30);
+
+  // ARPA is money; format it in the tenant's currency (US → USD, NG → NGN).
+  const { currency } = useCurrency();
 
   // Query snapshots from Convex for each vertical
   const queryVertical = selectedVertical === "all" ? "restaurant" : selectedVertical;
@@ -171,7 +176,7 @@ const KpiDashboard: React.FC<KpiDashboardProps> = ({ snapshots: propSnapshots })
               {METRIC_LABELS[metricName] ?? metricName}
             </p>
             <p className="text-2xl font-semibold text-white mt-2">
-              {hasData ? formatMetricValue(metricName, currentValue) : "—"}
+              {hasData ? formatMetricValue(metricName, currentValue, currency) : "—"}
             </p>
             <div className="flex items-center mt-2">
               {hasData && deltaLabel !== "—" ? (
