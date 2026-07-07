@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { generateSecureToken, sha256Hex } from "./tokenHash";
+import { requireRole, TENANT_OWNER_ROLES } from "./shared/ownership";
 
 /**
  * Invitation CRUD mutations and queries.
@@ -37,22 +38,11 @@ export const createInvitation = mutation({
     email: v.string(),
     role: invitationRoleValidator,
     tenantId: v.string(),
-    invitedBy: v.string(),
   },
   handler: async (ctx, args) => {
-    // Verify the caller has restaurant_owner role
-    const caller = await ctx.db
-      .query("users")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.invitedBy))
-      .first();
-
-    if (!caller) {
-      throw new Error("Inviting user not found");
-    }
-
-    if (caller.role !== "restaurant_owner") {
-      throw new Error("Only restaurant owners can create invitations");
-    }
+    // Resolve the caller from the SESSION (not a client-supplied id, which was
+    // spoofable) and require they own the tenant they're inviting into.
+    const caller = await requireRole(ctx, args.tenantId, TENANT_OWNER_ROLES);
 
     const now = Date.now();
     // Mint a CSPRNG token; store only its hash, return the raw value once.
@@ -63,7 +53,7 @@ export const createInvitation = mutation({
       email: args.email.toLowerCase().trim(),
       role: args.role,
       tenantId: args.tenantId,
-      invitedBy: args.invitedBy,
+      invitedBy: caller.userId ?? "",
       inviteToken: tokenHash,
       status: "pending",
       createdAt: now,
@@ -143,17 +133,17 @@ export const acceptInvitation = mutation({
  * Requirements: 9.7
  */
 export const revokeInvitation = mutation({
-  args: { inviteToken: v.string() },
+  // Keyed by the invitation id (what the owner dashboard holds). The raw token
+  // is never available to the owner — only its hash is stored — so token-based
+  // revoke could never match. Owner-gated via the invitation's tenant.
+  args: { invitationId: v.id("invitations") },
   handler: async (ctx, args) => {
-    const tokenHash = await sha256Hex(args.inviteToken);
-    const invitation = await ctx.db
-      .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
-      .first();
-
+    const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) {
       throw new Error("Invitation not found");
     }
+
+    await requireRole(ctx, invitation.tenantId, TENANT_OWNER_ROLES);
 
     if (invitation.status !== "pending") {
       throw new Error(`Cannot revoke an invitation that is ${invitation.status}`);
@@ -166,13 +156,14 @@ export const revokeInvitation = mutation({
 });
 
 /**
- * List all invitations for a given tenant.
+ * List all invitations for a given tenant. Owner-only (exposes invitee emails).
  *
  * Requirements: 9.2
  */
 export const getInvitationsByTenant = query({
   args: { tenantId: v.string() },
   handler: async (ctx, args) => {
+    await requireRole(ctx, args.tenantId, TENANT_OWNER_ROLES);
     const invitations = await ctx.db
       .query("invitations")
       .withIndex("by_tenant_id", (q) => q.eq("tenantId", args.tenantId))
@@ -183,22 +174,19 @@ export const getInvitationsByTenant = query({
 });
 
 /**
- * Resend a pending invitation — resets expiresAt to 7 days from now.
+ * Resend a pending invitation — rotates the token and resets expiry to 7 days.
  *
  * Requirements: 9.8
  */
 export const resendInvitation = mutation({
-  args: { inviteToken: v.string() },
+  args: { invitationId: v.id("invitations") },
   handler: async (ctx, args) => {
-    const tokenHash = await sha256Hex(args.inviteToken);
-    const invitation = await ctx.db
-      .query("invitations")
-      .withIndex("by_invite_token", (q) => q.eq("inviteToken", tokenHash))
-      .first();
-
+    const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) {
       throw new Error("Invitation not found");
     }
+
+    await requireRole(ctx, invitation.tenantId, TENANT_OWNER_ROLES);
 
     if (invitation.status !== "pending") {
       throw new Error(`Cannot resend an invitation that is ${invitation.status}`);

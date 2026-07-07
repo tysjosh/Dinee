@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { Doc } from "../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useTenant } from "@/contexts/TenantContext";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 
@@ -68,7 +68,6 @@ const TeamInvitations: React.FC = () => {
         email: trimmedEmail,
         role,
         tenantId,
-        invitedBy: user.userId,
       });
       setEmail("");
       setRole("supervisor");
@@ -81,10 +80,10 @@ const TeamInvitations: React.FC = () => {
     }
   };
 
-  const handleRevoke = async (inviteToken: string) => {
-    setActionLoading(inviteToken);
+  const handleRevoke = async (invitationId: Id<"invitations">) => {
+    setActionLoading(invitationId);
     try {
-      await revokeInvitation({ inviteToken });
+      await revokeInvitation({ invitationId });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to revoke invitation.";
       setError(message);
@@ -93,10 +92,10 @@ const TeamInvitations: React.FC = () => {
     }
   };
 
-  const handleResend = async (inviteToken: string) => {
-    setActionLoading(inviteToken);
+  const handleResend = async (invitationId: Id<"invitations">) => {
+    setActionLoading(invitationId);
     try {
-      await resendInvitation({ inviteToken });
+      await resendInvitation({ invitationId });
       setSuccessMessage("Invitation resent successfully.");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to resend invitation.";
@@ -267,7 +266,7 @@ const TeamInvitations: React.FC = () => {
                     {invitations.map((inv: Doc<"invitations">) => {
                       const isPending =
                         inv.status === "pending" && inv.expiresAt >= Date.now();
-                      const isActionLoading = actionLoading === inv.inviteToken;
+                      const isActionLoading = actionLoading === inv._id;
 
                       return (
                         <tr
@@ -293,14 +292,14 @@ const TeamInvitations: React.FC = () => {
                             {isPending && (
                               <div className="flex items-center justify-end gap-2">
                                 <button
-                                  onClick={() => handleResend(inv.inviteToken)}
+                                  onClick={() => handleResend(inv._id)}
                                   disabled={isActionLoading}
                                   className="px-2.5 py-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-md transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                                 >
                                   Resend
                                 </button>
                                 <button
-                                  onClick={() => handleRevoke(inv.inviteToken)}
+                                  onClick={() => handleRevoke(inv._id)}
                                   disabled={isActionLoading}
                                   className="px-2.5 py-1 text-xs font-medium text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-md transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                                 >

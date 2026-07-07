@@ -19,6 +19,21 @@ import type { Doc } from "../_generated/dataModel";
 
 type AnyCtx = QueryCtx | MutationCtx;
 
+/** All application roles. */
+export type AppRole =
+  | "platform_admin"
+  | "restaurant_owner"
+  | "business_owner"
+  | "branch_manager"
+  | "supervisor"
+  | "partner";
+
+/**
+ * Roles that fully control a tenant (billing, integrations, staff, tenant-wide
+ * config). Branch managers and supervisors are operational and excluded.
+ */
+export const TENANT_OWNER_ROLES: AppRole[] = ["restaurant_owner", "business_owner"];
+
 /**
  * Resolve the authenticated user's app record (with role/tenantId), or null
  * when the request carries no valid identity.
@@ -73,6 +88,57 @@ export async function requireTenantAccess(
   if (isPlatformAdmin(user)) return user;
   if (user.tenantId && user.tenantId === restaurantId) return user;
   throw new Error("Forbidden: you do not have access to this resource");
+}
+
+/**
+ * Require tenant access AND that the caller holds one of `allowedRoles`.
+ * Platform admins always pass. Use for owner-only actions within a tenant
+ * (billing, integrations, staff invitations, tenant-wide config) so branch
+ * managers / supervisors — who legitimately have tenant access for day-to-day
+ * operations — cannot perform them.
+ */
+export async function requireRole(
+  ctx: AnyCtx,
+  restaurantId: string,
+  allowedRoles: AppRole[]
+): Promise<Doc<"users">> {
+  const user = await requireTenantAccess(ctx, restaurantId);
+  if (isPlatformAdmin(user)) return user;
+  if (!user.role || !allowedRoles.includes(user.role as AppRole)) {
+    throw new Error("Forbidden: your role may not perform this action");
+  }
+  return user;
+}
+
+/**
+ * Require that the caller may act on the given BRANCH. Resolves the branch to
+ * its owning tenant and enforces tenant access, then — for branch-scoped roles
+ * (branch_manager / supervisor) that have an explicit `assignedBranchIds` list —
+ * restricts them to their assigned branches. Owners, business owners, and
+ * platform admins are not branch-restricted. A branch-scoped user with no
+ * assignment set is treated as unrestricted within their tenant (backward
+ * compatible) until an owner assigns branches.
+ */
+export async function requireBranchAccess(
+  ctx: AnyCtx,
+  branchId: string
+): Promise<Doc<"users">> {
+  const branch = await ctx.db
+    .query("branches")
+    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+    .first();
+  const user = await requireTenantAccess(ctx, branch?.restaurantId ?? "");
+  if (isPlatformAdmin(user)) return user;
+
+  const branchScoped =
+    user.role === "branch_manager" || user.role === "supervisor";
+  const assigned = user.assignedBranchIds;
+  if (branchScoped && Array.isArray(assigned) && assigned.length > 0) {
+    if (!assigned.includes(branchId)) {
+      throw new Error("Forbidden: this branch is outside your assignment");
+    }
+  }
+  return user;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

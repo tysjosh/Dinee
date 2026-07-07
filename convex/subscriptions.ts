@@ -10,7 +10,7 @@
 
 import { v } from "convex/values";
 import { mutation, query, internalMutation } from "./_generated/server";
-import { requireTenantAccess, requirePlatformAdmin } from "./shared/ownership";
+import { requireTenantAccess, requirePlatformAdmin, requireRole, TENANT_OWNER_ROLES } from "./shared/ownership";
 import { assertInternalCaller } from "./shared/internalAuth";
 
 // Server-to-server billing functions (payment verify + provider webhooks) run
@@ -1181,8 +1181,8 @@ export const schedulePlanChange = mutation({
       throw new Error(`Subscription ${args.subscriptionId} not found`);
     }
 
-    // The caller must own the restaurant this subscription belongs to.
-    await requireTenantAccess(ctx, subscription.restaurantId);
+    // Billing is an owner-only action — branch managers/supervisors are excluded.
+    await requireRole(ctx, subscription.restaurantId, TENANT_OWNER_ROLES);
 
     if (subscription.status === "cancelled") {
       throw new Error("Cannot schedule a plan change for a cancelled subscription");
@@ -1221,8 +1221,8 @@ export const setCancelAtPeriodEnd = mutation({
       throw new Error(`Subscription ${args.subscriptionId} not found`);
     }
 
-    // The caller must own the restaurant this subscription belongs to.
-    await requireTenantAccess(ctx, subscription.restaurantId);
+    // Billing is an owner-only action — branch managers/supervisors are excluded.
+    await requireRole(ctx, subscription.restaurantId, TENANT_OWNER_ROLES);
 
     await ctx.db.patch(subscription._id, {
       cancelAtPeriodEnd: args.cancelAtPeriodEnd,

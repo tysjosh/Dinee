@@ -58,6 +58,10 @@ export default defineSchema({
     isAnonymous: v.optional(v.boolean()),
     // Custom app fields (all optional so auth-created users work)
     userId: v.optional(v.string()),
+    // Branch scoping for branch_manager / supervisor. When set (non-empty),
+    // the user may only act on these branches; empty/absent = not branch-
+    // restricted within their tenant. Owners/admins are never restricted.
+    assignedBranchIds: v.optional(v.array(v.string())),
     role: v.optional(v.union(
       v.literal("platform_admin"),
       v.literal("restaurant_owner"),

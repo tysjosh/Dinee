@@ -134,7 +134,13 @@ export async function POST(request: NextRequest) {
     if (!me) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }
-    const owns = me.role === "platform_admin" || me.tenantId === restaurantId;
+    // Billing is owner-only: platform admin, or a tenant OWNER (restaurant/
+    // business owner) of this restaurant. Branch managers/supervisors are
+    // excluded even though they have day-to-day tenant access.
+    const isOwnerOfTenant =
+      me.tenantId === restaurantId &&
+      (me.role === "restaurant_owner" || me.role === "business_owner");
+    const owns = me.role === "platform_admin" || isOwnerOfTenant;
     if (!owns) {
       return NextResponse.json(
         { error: "You do not have access to this restaurant's billing" },
