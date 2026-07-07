@@ -181,6 +181,28 @@ export async function requireTenantAccessOrInternal(
 
 /**
  * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from a session user who may act on the given BRANCH.
+ *
+ * Server-to-server callers (Voice_Runtime, webhooks) forwarding the internal
+ * secret are unrestricted — they resolve the branch themselves and are not
+ * subject to per-user branch assignment. Session callers go through
+ * `requireBranchAccess`, which enforces tenant ownership AND restricts
+ * branch-scoped roles (branch_manager / supervisor) with a populated
+ * `assignedBranchIds` to their assigned branches. Owners / platform admins and
+ * branch-scoped users with no assignment set remain unrestricted within their
+ * tenant (backward compatible).
+ */
+export async function requireBranchAccessOrInternal(
+  ctx: AnyCtx,
+  branchId: string,
+  internalSecret: string | undefined
+): Promise<void> {
+  if (hasValidInternalSecret(internalSecret)) return;
+  await requireBranchAccess(ctx, branchId);
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
  * secret) OR from any authenticated session user. Returns the session user
  * record when present (server callers return null). Used for creation, where
  * an onboarding user does not yet own a tenant.

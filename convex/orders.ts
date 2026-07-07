@@ -2,21 +2,20 @@ import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+import {
+  requireTenantAccessOrInternal,
+  requireBranchAccessOrInternal,
+  requirePlatformAdmin,
+} from "./shared/ownership";
 
 // Orders are tenant-scoped. These functions serve the dashboard (session) and
 // server routes (payment webhooks, messaging, rider API, partner API — all of
 // which forward the internal secret). Order capture during a call goes through
 // the secret-guarded internal.upsertOrders, not these functions.
-
-/** Resolve a branchId to its owning restaurantId for tenant checks. */
-async function branchRestaurantId(ctx: QueryCtx, branchId: string): Promise<string> {
-  const branch = await ctx.db
-    .query("branches")
-    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
-    .first();
-  return branch?.restaurantId ?? "";
-}
+//
+// Branch-keyed readers use requireBranchAccessOrInternal so branch-scoped users
+// (branch_manager / supervisor) with a populated assignedBranchIds are limited
+// to their assigned branches; owners/admins and internal callers are not.
 
 /** Resolve an orderId (business id, not doc id) to its owning restaurantId. */
 async function orderRestaurantId(ctx: QueryCtx, orderId: string): Promise<string> {
@@ -175,11 +174,7 @@ export const getOrdersByRestaurant = query({
 export const getOrdersByBranch = query({
   args: { branchId: v.string(), limit: v.optional(v.number()), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -210,11 +205,7 @@ export const getActiveOrdersByRestaurant = query({
 export const getActiveOrdersByBranch = query({
   args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -249,11 +240,7 @@ export const getPastOrdersByRestaurant = query({
 export const getPastOrdersByBranch = query({
   args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -632,11 +619,7 @@ export const getCODOrdersByBranch = query({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     let orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -748,11 +731,7 @@ export const getCODReconciliationSummary = query({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     // Get the date to filter by (default to today)
     const targetDate = args.date || new Date().toISOString().split('T')[0];
     const startOfDay = new Date(targetDate).setHours(0, 0, 0, 0);

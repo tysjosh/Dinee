@@ -5,7 +5,9 @@ import {
   requireUser,
   requirePlatformAdmin,
   requireTenantAccess,
+  requireRole,
   isPlatformAdmin,
+  TENANT_OWNER_ROLES,
 } from "./shared/ownership";
 
 // User role validator (reusable)
@@ -338,6 +340,60 @@ export const updateUser = mutation({
     }
 
     return user._id;
+  },
+});
+
+/**
+ * Assign the set of branches a branch-scoped staff user (branch_manager /
+ * supervisor) may access within the caller's tenant.
+ *
+ * Owner-only within the tenant (restaurant_owner / business_owner or a platform
+ * admin). This is what actually POPULATES `assignedBranchIds`; until an owner
+ * calls it, a branch-scoped user is unrestricted within their tenant (backward
+ * compatible), so branch isolation in the `*ByBranch` readers is a no-op. After
+ * assignment those readers restrict the user to exactly these branches.
+ *
+ * Validates before write: the target user must belong to the caller's tenant,
+ * and every branchId must be a branch OWNED by that same tenant — so an owner
+ * cannot grant access to another tenant's branch. Passing an empty array clears
+ * the assignment (returns the user to unrestricted-within-tenant).
+ */
+export const setUserAssignedBranches = mutation({
+  args: {
+    userId: v.string(),
+    branchIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const target = await ctx.db
+      .query("users")
+      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .first();
+
+    if (!target) {
+      throw new Error("User not found");
+    }
+
+    // Caller must be an owner (or platform admin) of the TARGET user's tenant.
+    // A user with no tenant cannot be branch-assigned by a non-admin owner.
+    await requireRole(ctx, target.tenantId ?? "", TENANT_OWNER_ROLES);
+
+    // Every branch must be owned by the target user's tenant — prevents an
+    // owner from granting cross-tenant branch access. De-duplicate.
+    const uniqueBranchIds = Array.from(new Set(args.branchIds));
+    for (const branchId of uniqueBranchIds) {
+      const branch = await ctx.db
+        .query("branches")
+        .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+        .first();
+      if (!branch || branch.restaurantId !== target.tenantId) {
+        throw new Error(
+          `Branch "${branchId}" does not belong to this tenant`
+        );
+      }
+    }
+
+    await ctx.db.patch(target._id, { assignedBranchIds: uniqueBranchIds });
+    return target._id;
   },
 });
 

@@ -1,21 +1,20 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+import {
+  requireTenantAccessOrInternal,
+  requireBranchAccessOrInternal,
+  requirePlatformAdmin,
+} from "./shared/ownership";
 
 // Call/transcript data is tenant-scoped. These functions serve the dashboard
 // (session) and server routes (partner API, forwards the internal secret). The
 // voice runtime writes call data via the secret-guarded internal.upsertCallData
 // / addTranscript, not these functions.
-
-/** Resolve a branchId to its owning restaurantId for tenant checks. */
-async function branchRestaurantId(ctx: QueryCtx, branchId: string): Promise<string> {
-  const branch = await ctx.db
-    .query("branches")
-    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
-    .first();
-  return branch?.restaurantId ?? "";
-}
+//
+// Branch-keyed readers use requireBranchAccessOrInternal so branch-scoped users
+// (branch_manager / supervisor) with a populated assignedBranchIds are limited
+// to their assigned branches; owners/admins and internal callers are not.
 
 /** Resolve a callId to its owning restaurantId for tenant checks. */
 async function callRestaurantId(ctx: QueryCtx, callId: string): Promise<string> {
@@ -108,11 +107,7 @@ export const getCallsByRestaurant = query({
 export const getCallsByBranch = query({
   args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -142,11 +137,7 @@ export const getActiveCallsByRestaurant = query({
 export const getActiveCallsByBranch = query({
   args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -177,11 +168,7 @@ export const getPastCallsByRestaurant = query({
 export const getPastCallsByBranch = query({
   args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(
-      ctx,
-      await branchRestaurantId(ctx, args.branchId),
-      args.internalSecret
-    );
+    await requireBranchAccessOrInternal(ctx, args.branchId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
