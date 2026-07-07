@@ -618,11 +618,11 @@ export function FraudReviewDashboard({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Convex queries
-  const fraudStats = useQuery(api.fraudSignals.getFraudStats);
+  const fraudStats = useQuery(api.fraudSignals.getFraudStats, {});
   const flaggedNumbers = useQuery(api.fraudSignals.getFlaggedNumbers, {
     signalCountThreshold: 3,
   });
-  const blockedNumbers = useQuery(api.fraudSignals.getBlockedNumbers);
+  const blockedNumbers = useQuery(api.fraudSignals.getBlockedNumbers, {});
 
   // Convex mutations
   const blockNumber = useMutation(api.fraudSignals.blockNumber);

@@ -1,5 +1,10 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { assertInternalCaller } from "./shared/internalAuth";
+
+// Callback sessions are created/consumed only by the voice runtime (ws-server,
+// server-to-server). Each requires the forwarded internal secret so a client
+// cannot forge or consume a callback handoff.
 
 /**
  * Create a new callback session with 5-minute TTL.
@@ -11,8 +16,10 @@ export const createSession = mutation({
     phoneNumber: v.string(),
     reason: v.optional(v.string()),
     data: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const now = Date.now();
     const id = await ctx.db.insert("callbackSessions", {
       sessionId: args.sessionId,
@@ -36,8 +43,10 @@ export const createSession = mutation({
 export const getAndConsumeSession = mutation({
   args: {
     sessionId: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const session = await ctx.db
       .query("callbackSessions")
       .withIndex("by_session_id", (q) => q.eq("sessionId", args.sessionId))
@@ -69,8 +78,9 @@ export const getAndConsumeSession = mutation({
  * Meant to be called as a scheduled job (e.g., every few minutes).
  */
 export const cleanupExpiredSessions = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { internalSecret: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    assertInternalCaller(args.internalSecret);
     const now = Date.now();
     const expired = await ctx.db
       .query("callbackSessions")

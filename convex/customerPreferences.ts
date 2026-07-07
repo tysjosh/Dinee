@@ -1,12 +1,18 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { requireUserOrInternal } from "./shared/ownership";
 
 /**
  * Customer Preferences CRUD Operations
- * 
+ *
  * Manages customer communication preferences for WhatsApp and SMS opt-in/opt-out.
- * Validates: Requirements 13.1 - Schema defines customer_preferences table with
- * phoneNumber, whatsappOptIn, smsOptIn, and updatedAt fields.
+ *
+ * SECURITY: preferences are keyed by phone number (not tenant-scoped), so these
+ * require either an authenticated session (a dashboard user handling the
+ * customer) or the internal secret (server callers: WhatsApp webhook, messaging
+ * routes). Previously fully public — anyone could opt any customer in/out.
+ *
+ * Validates: Requirements 13.1
  */
 
 /**
@@ -16,8 +22,10 @@ import { query, mutation } from "./_generated/server";
 export const getByPhoneNumber = query({
   args: {
     phoneNumber: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const preferences = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -37,8 +45,10 @@ export const upsertPreferences = mutation({
     whatsappOptIn: v.boolean(),
     smsOptIn: v.boolean(),
     preferredLanguage: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const existing = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -78,8 +88,10 @@ export const updateWhatsAppOptIn = mutation({
   args: {
     phoneNumber: v.string(),
     optIn: v.boolean(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const existing = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -114,8 +126,10 @@ export const updateSmsOptIn = mutation({
   args: {
     phoneNumber: v.string(),
     optIn: v.boolean(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const existing = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -151,8 +165,10 @@ export const updateSmsOptIn = mutation({
 export const checkWhatsAppOptIn = query({
   args: {
     phoneNumber: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const preferences = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -169,8 +185,10 @@ export const checkWhatsAppOptIn = query({
 export const checkSmsOptIn = query({
   args: {
     phoneNumber: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUserOrInternal(ctx, args.internalSecret);
     const preferences = await ctx.db
       .query("customerPreferences")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))

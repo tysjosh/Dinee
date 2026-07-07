@@ -1,5 +1,11 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { requirePlatformAdminOrInternal } from "./shared/ownership";
+
+// Fraud signals are GLOBAL (keyed by phone number, not tenant-scoped), so these
+// require a platform-admin session (the fraud review dashboard) or the internal
+// secret (server callers, e.g. the voice runtime recording/checking signals).
+// Previously fully public — anyone could read the blocklist or unblock numbers.
 
 /**
  * Fraud Signals CRUD Operations
@@ -37,8 +43,10 @@ export const recordFraudSignal = mutation({
   args: {
     phoneNumber: v.string(),
     signalType: signalTypeValidator,
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const now = Date.now();
 
     // Check if a signal of this type already exists for this phone number
@@ -79,8 +87,10 @@ export const recordFraudSignal = mutation({
 export const getFraudSignals = query({
   args: {
     phoneNumber: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const signals = await ctx.db
       .query("fraudSignals")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -97,8 +107,9 @@ export const getFraudSignals = query({
  * Validates: Requirement 25.3
  */
 export const getBlockedNumbers = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { internalSecret: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const blockedSignals = await ctx.db
       .query("fraudSignals")
       .withIndex("by_blocked", (q) => q.eq("isBlocked", true))
@@ -138,8 +149,10 @@ export const blockNumber = mutation({
   args: {
     phoneNumber: v.string(),
     reviewedBy: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const now = Date.now();
 
     // Get all signals for this phone number
@@ -189,8 +202,10 @@ export const unblockNumber = mutation({
   args: {
     phoneNumber: v.string(),
     reviewedBy: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const now = Date.now();
 
     // Get all signals for this phone number
@@ -231,8 +246,10 @@ export const updateDisposition = mutation({
     signalType: signalTypeValidator,
     disposition: dispositionValidator,
     reviewedBy: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const now = Date.now();
 
     // Find the specific signal
@@ -270,8 +287,10 @@ export const updateDisposition = mutation({
 export const isPhoneBlocked = query({
   args: {
     phoneNumber: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const signals = await ctx.db
       .query("fraudSignals")
       .withIndex("by_phone", (q) => q.eq("phoneNumber", args.phoneNumber))
@@ -300,8 +319,10 @@ export const isPhoneBlocked = query({
 export const getFlaggedNumbers = query({
   args: {
     signalCountThreshold: v.optional(v.number()), // Default threshold is 3
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const threshold = args.signalCountThreshold ?? 3;
 
     // Get all signals
@@ -351,8 +372,10 @@ export const deleteFraudSignal = mutation({
   args: {
     phoneNumber: v.string(),
     signalType: signalTypeValidator,
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     // Find the specific signal
     const signals = await ctx.db
       .query("fraudSignals")
@@ -375,8 +398,9 @@ export const deleteFraudSignal = mutation({
  * Returns aggregate statistics for fraud monitoring
  */
 export const getFraudStats = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { internalSecret: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requirePlatformAdminOrInternal(ctx, args.internalSecret);
     const allSignals = await ctx.db
       .query("fraudSignals")
       .collect();

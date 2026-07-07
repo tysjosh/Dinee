@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { formatPhoneNumber } from "@/lib/messaging/MessagingService";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 // ============================================================================
 // Types
@@ -471,6 +472,7 @@ async function processIncomingMessage(
     await convexClient.mutation(api.customerPreferences.updateWhatsAppOptIn, {
       phoneNumber,
       optIn,
+      ...internalSecretArg(),
     });
     
     console.log(`WhatsApp webhook: Updated whatsappOptIn to ${optIn} for ${phoneNumber}`);

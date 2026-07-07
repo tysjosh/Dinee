@@ -146,7 +146,7 @@ async function fetchOptInStatus(
   try {
     const preferences = await convexClient.query(
       api.customerPreferences.getByPhoneNumber,
-      { phoneNumber }
+      { phoneNumber, ...internalSecretArg() }
     );
 
     if (preferences) {

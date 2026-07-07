@@ -178,6 +178,13 @@ if (!process.env.INTEGRATION_ENCRYPTION_KEY) {
 // Convex client for persistent callback session storage
 const convexClient = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
+// Forward the shared internal secret to server-to-server Convex functions
+// (callback sessions are guarded by INTERNAL_API_KEY). Empty when unset (dev).
+function internalSecretArg(): { internalSecret?: string } {
+  const key = process.env.INTERNAL_API_KEY;
+  return key ? { internalSecret: key } : {};
+}
+
 // Register the restaurant and logistics VoiceDomainPacks (and wire their tool
 // handlers into the runtime tool executor) at startup, so the pack-driven
 // session driver can resolve packs by conversation type (Req 3.1, 4.2). The
@@ -307,6 +314,7 @@ fastify.all("/callback", async (request: any, reply) => {
       phoneNumber,
       reason: Array.isArray(reason) ? reason[0] : reason,
       data: typeof data === "string" ? data : JSON.stringify(data),
+      ...internalSecretArg(),
     });
 
     const client = twilio(process.env.NEXT_TWILIO_SID, process.env.NEXT_TWILIO_AUTH_TOKEN);
@@ -1087,7 +1095,7 @@ fastify.register(async (fastify) => {
     
     // Get and consume callback session from Convex (atomic, persistent)
     const callbackContext = sessionId 
-      ? await convexClient.mutation(api.callbackSessions.getAndConsumeSession, { sessionId })
+      ? await convexClient.mutation(api.callbackSessions.getAndConsumeSession, { sessionId, ...internalSecretArg() })
       : null;
     
     // Connection-specific state
