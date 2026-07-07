@@ -219,7 +219,9 @@ export default defineSchema({
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
-    .index("by_call_and_order_id", ["callId", "orderId"]),
+    .index("by_call_and_order_id", ["callId", "orderId"])
+    // Global time index for period-scoped KPI aggregation (daily cron).
+    .index("by_call_start_time", ["callStartTime"]),
 
   // Orders (extended for multi-tenancy, payments, and delivery)
   orders: defineTable({
@@ -328,6 +330,8 @@ export default defineSchema({
     // Date-scoped history reads (partner API): filter/sort by placement time
     // within a restaurant without scanning the whole table.
     .index("by_restaurant_and_placement", ["restaurantId", "orderPlacementTime"])
+    // Global time index for period-scoped KPI aggregation (daily cron).
+    .index("by_order_placement_time", ["orderPlacementTime"])
     .index("by_public_order_code_and_restaurant", ["publicOrderCode", "restaurantId"]),
 
   // Transcripts

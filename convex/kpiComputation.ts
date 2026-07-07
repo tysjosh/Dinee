@@ -36,20 +36,26 @@ export const getActiveTenantCount = query({
       .query("restaurants")
       .withIndex("by_vertical", (q) => q.eq("vertical", args.vertical))
       .collect();
+    const verticalIds = new Set(restaurants.map((r) => r.restaurantId));
+    if (verticalIds.size === 0) return 0;
 
-    let count = 0;
-    for (const r of restaurants) {
-      const calls = await ctx.db
-        .query("calls")
-        .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", r.restaurantId))
-        .collect();
-      const hasCallInWindow = calls.some(
-        (c) => (c.callStartTime ?? c._creationTime) >= args.windowStart &&
-               (c.callStartTime ?? c._creationTime) < args.windowEnd
-      );
-      if (hasCallInWindow) count++;
+    // Scan only the window's calls via the time index (was an N+1 loop that
+    // collected every call for every restaurant), then count distinct tenants
+    // in this vertical that had a call.
+    const windowCalls = await ctx.db
+      .query("calls")
+      .withIndex("by_call_start_time", (q) =>
+        q.gte("callStartTime", args.windowStart).lt("callStartTime", args.windowEnd)
+      )
+      .collect();
+
+    const activeIds = new Set<string>();
+    for (const c of windowCalls) {
+      if (c.restaurantId && verticalIds.has(c.restaurantId)) {
+        activeIds.add(c.restaurantId);
+      }
     }
-    return count;
+    return activeIds.size;
   },
 });
 
@@ -65,11 +71,16 @@ export const getCallMetrics = query({
       .collect();
     const restaurantIds = new Set(restaurants.map((r) => r.restaurantId));
 
-    const allCalls = await ctx.db.query("calls").collect();
-    const periodCalls = allCalls.filter((c) => {
-      const t = c.callStartTime ?? c._creationTime;
-      return t >= args.periodStart && t < args.periodEnd && c.restaurantId && restaurantIds.has(c.restaurantId);
-    });
+    // Scan only the period's calls via the time index (was a whole-table scan).
+    const periodCallsAll = await ctx.db
+      .query("calls")
+      .withIndex("by_call_start_time", (q) =>
+        q.gte("callStartTime", args.periodStart).lt("callStartTime", args.periodEnd)
+      )
+      .collect();
+    const periodCalls = periodCallsAll.filter(
+      (c) => c.restaurantId && restaurantIds.has(c.restaurantId)
+    );
 
     let totalDurationSeconds = 0;
     for (const call of periodCalls) {
@@ -95,20 +106,30 @@ export const getConversionRate = query({
       .collect();
     const restaurantIds = new Set(restaurants.map((r) => r.restaurantId));
 
-    const allCalls = await ctx.db.query("calls").collect();
-    const completedCalls = allCalls.filter((c) => {
-      const t = c.callStartTime ?? c._creationTime;
-      return t >= args.periodStart && t < args.periodEnd &&
-             c.status === "completed" &&
-             c.restaurantId && restaurantIds.has(c.restaurantId);
-    });
+    // Scan only the period's calls/orders via the time indexes (was two
+    // whole-table scans).
+    const periodCalls = await ctx.db
+      .query("calls")
+      .withIndex("by_call_start_time", (q) =>
+        q.gte("callStartTime", args.periodStart).lt("callStartTime", args.periodEnd)
+      )
+      .collect();
+    const completedCalls = periodCalls.filter(
+      (c) =>
+        c.status === "completed" &&
+        c.restaurantId &&
+        restaurantIds.has(c.restaurantId)
+    );
 
-    const allOrders = await ctx.db.query("orders").collect();
-    const ordersFromCalls = allOrders.filter((o) => {
-      const t = o.orderPlacementTime ?? o._creationTime;
-      return t >= args.periodStart && t < args.periodEnd &&
-             o.callId && restaurantIds.has(o.restaurantId);
-    });
+    const periodOrders = await ctx.db
+      .query("orders")
+      .withIndex("by_order_placement_time", (q) =>
+        q.gte("orderPlacementTime", args.periodStart).lt("orderPlacementTime", args.periodEnd)
+      )
+      .collect();
+    const ordersFromCalls = periodOrders.filter(
+      (o) => o.callId && restaurantIds.has(o.restaurantId)
+    );
 
     if (completedCalls.length === 0) return 0;
     return Math.round((ordersFromCalls.length / completedCalls.length) * 10000) / 10000;
