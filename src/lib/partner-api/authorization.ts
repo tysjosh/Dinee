@@ -111,6 +111,7 @@ async function resolveParentRestaurantId(
     case "call": {
       const call = await convexClient.query(api.calls.getCallByCallId, {
         callId: resourceId,
+        ...internalSecretArg(),
       });
       return call?.restaurantId ?? null;
     }

@@ -1,11 +1,37 @@
 import { mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+
+// Orders are tenant-scoped. These functions serve the dashboard (session) and
+// server routes (payment webhooks, messaging, rider API, partner API — all of
+// which forward the internal secret). Order capture during a call goes through
+// the secret-guarded internal.upsertOrders, not these functions.
+
+/** Resolve a branchId to its owning restaurantId for tenant checks. */
+async function branchRestaurantId(ctx: QueryCtx, branchId: string): Promise<string> {
+  const branch = await ctx.db
+    .query("branches")
+    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+    .first();
+  return branch?.restaurantId ?? "";
+}
+
+/** Resolve an orderId (business id, not doc id) to its owning restaurantId. */
+async function orderRestaurantId(ctx: QueryCtx, orderId: string): Promise<string> {
+  const order = await ctx.db
+    .query("orders")
+    .withIndex("by_order_id", (q) => q.eq("orderId", orderId))
+    .unique();
+  return order?.restaurantId ?? "";
+}
 
 // Get an order by orderId
 export const getOrderByOrderId = query({
-  args: { orderId: v.string(), restaurantId: v.string() },
+  args: { orderId: v.string(), restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const order = await ctx.db
       .query("orders")
       .withIndex("by_order_and_restaurant_id", (q) =>
@@ -18,12 +44,13 @@ export const getOrderByOrderId = query({
 // Look up an order by orderId only (without restaurantId)
 // Used by webhook handlers, rider API, and messaging routes that only have orderId
 export const getOrderByOrderIdOnly = query({
-  args: { orderId: v.string() },
+  args: { orderId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const order = await ctx.db
       .query("orders")
       .withIndex("by_order_id", (q) => q.eq("orderId", args.orderId))
       .unique();
+    await requireTenantAccessOrInternal(ctx, order?.restaurantId ?? "", args.internalSecret);
     return order || null;
   },
 });
@@ -42,8 +69,10 @@ export const updatePaymentStatus = mutation({
     ),
     paymentReference: v.optional(v.string()),
     paymentTimestamp: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -108,8 +137,10 @@ export const getOrdersByRestaurant = query({
     limit: v.optional(v.number()),
     startDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const { restaurantId, startDate, endDate } = args;
     const take = clampOrderLimit(args.limit);
 
@@ -142,8 +173,13 @@ export const getOrdersByRestaurant = query({
 
 // Get orders for a branch (newest first, bounded).
 export const getOrdersByBranch = query({
-  args: { branchId: v.string(), limit: v.optional(v.number()) },
+  args: { branchId: v.string(), limit: v.optional(v.number()), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -156,8 +192,9 @@ export const getOrdersByBranch = query({
 
 // Get active orders for a restaurant
 export const getActiveOrdersByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -171,8 +208,13 @@ export const getActiveOrdersByRestaurant = query({
 
 // Get active orders for a branch
 export const getActiveOrdersByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -186,8 +228,9 @@ export const getActiveOrdersByBranch = query({
 
 // Get past orders (completed or cancelled) for a restaurant
 export const getPastOrdersByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -204,8 +247,13 @@ export const getPastOrdersByRestaurant = query({
 
 // Get past orders (completed or cancelled) for a branch
 export const getPastOrdersByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -220,7 +268,7 @@ export const getPastOrdersByBranch = query({
   },
 });
 
-// Get orders by payment status
+// Get orders by payment status (platform-wide, cross-tenant) — admins only.
 export const getOrdersByPaymentStatus = query({
   args: { paymentStatus: v.union(
     v.literal("pending"),
@@ -229,6 +277,7 @@ export const getOrdersByPaymentStatus = query({
     v.literal("refunded")
   ) },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_payment_status", (q) => q.eq("paymentStatus", args.paymentStatus))
@@ -239,7 +288,7 @@ export const getOrdersByPaymentStatus = query({
   },
 });
 
-// Get orders by delivery status
+// Get orders by delivery status (platform-wide, cross-tenant) — admins only.
 export const getOrdersByDeliveryStatus = query({
   args: { deliveryStatus: v.union(
     v.literal("pending"),
@@ -250,6 +299,7 @@ export const getOrdersByDeliveryStatus = query({
     v.literal("failed")
   ) },
   handler: async (ctx, args) => {
+    await requirePlatformAdmin(ctx);
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_delivery_status", (q) => q.eq("deliveryStatus", args.deliveryStatus))
@@ -326,15 +376,18 @@ export const updateOrder = mutation({
     sendStatusMessage: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),
     estimatedDeliveryMinutes: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { orderId, sendStatusMessage, restaurantName, estimatedDeliveryMinutes, ...updates } = args;
+    const { orderId, sendStatusMessage, restaurantName, estimatedDeliveryMinutes, internalSecret, ...updates } = args;
 
     // Get the current order to check for status changes
     const currentOrder = await ctx.db.get(orderId);
     if (!currentOrder) {
       throw new Error(`Order not found: ${orderId}`);
     }
+
+    await requireTenantAccessOrInternal(ctx, currentOrder.restaurantId, internalSecret);
 
     // Define proper type for order updates
     type OrderUpdate = {
@@ -433,8 +486,10 @@ export const updateOrder = mutation({
 
 // Delete an order
 export const deleteOrder = mutation({
-  args: { orderId: v.id("orders") },
+  args: { orderId: v.id("orders"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.orderId);
+    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
     await ctx.db.delete(args.orderId);
     return args.orderId;
   },
@@ -442,8 +497,10 @@ export const deleteOrder = mutation({
 
 // Complete an order
 export const completeOrder = mutation({
-  args: { orderId: v.id("orders") },
+  args: { orderId: v.id("orders"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.orderId);
+    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
     await ctx.db.patch(args.orderId, {
       status: "completed",
     });
@@ -459,6 +516,7 @@ export const cancelOrder = mutation({
     cancellationReason: v.optional(v.string()),
     sendStatusMessage: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Get the current order to check opt-in status
@@ -466,6 +524,8 @@ export const cancelOrder = mutation({
     if (!currentOrder) {
       throw new Error(`Order not found: ${args.orderId}`);
     }
+
+    await requireTenantAccessOrInternal(ctx, currentOrder.restaurantId, args.internalSecret);
 
     await ctx.db.patch(args.orderId, {
       status: "cancelled",
@@ -521,8 +581,10 @@ export const createOrderWithPayment = mutation({
     whatsappOptIn: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),
     estimatedDeliveryMinutes: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Determine initial payment status based on payment method
     // COD orders start with "pending" status as per requirement 10.1
     const paymentStatus = "pending";
@@ -567,8 +629,14 @@ export const getCODOrdersByBranch = query({
   args: { 
     branchId: v.string(),
     date: v.optional(v.string()), // YYYY-MM-DD format
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     let orders = await ctx.db
       .query("orders")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -598,8 +666,10 @@ export const recordCODPaymentCollection = mutation({
     restaurantId: v.string(),
     collectedBy: v.string(),
     notes: v.optional(v.string()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -635,8 +705,10 @@ export const recordCODPaymentFailure = mutation({
     orderId: v.string(),
     restaurantId: v.string(),
     failureReason: v.string(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -673,8 +745,14 @@ export const getCODReconciliationSummary = query({
   args: {
     branchId: v.string(),
     date: v.optional(v.string()), // YYYY-MM-DD format, defaults to today
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     // Get the date to filter by (default to today)
     const targetDate = args.date || new Date().toISOString().split('T')[0];
     const startOfDay = new Date(targetDate).setHours(0, 0, 0, 0);
@@ -756,8 +834,10 @@ export const updateOrderStatus = mutation({
     sendStatusMessage: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),
     estimatedDeliveryMinutes: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -851,8 +931,10 @@ export const updateDeliveryStatus = mutation({
     sendStatusMessage: v.optional(v.boolean()),
     restaurantName: v.optional(v.string()),
     estimatedDeliveryMinutes: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")

@@ -1,5 +1,30 @@
 import { mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+
+// Call/transcript data is tenant-scoped. These functions serve the dashboard
+// (session) and server routes (partner API, forwards the internal secret). The
+// voice runtime writes call data via the secret-guarded internal.upsertCallData
+// / addTranscript, not these functions.
+
+/** Resolve a branchId to its owning restaurantId for tenant checks. */
+async function branchRestaurantId(ctx: QueryCtx, branchId: string): Promise<string> {
+  const branch = await ctx.db
+    .query("branches")
+    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+    .first();
+  return branch?.restaurantId ?? "";
+}
+
+/** Resolve a callId to its owning restaurantId for tenant checks. */
+async function callRestaurantId(ctx: QueryCtx, callId: string): Promise<string> {
+  const call = await ctx.db
+    .query("calls")
+    .withIndex("by_call_and_order_id", (q) => q.eq("callId", callId))
+    .first();
+  return call?.restaurantId ?? "";
+}
 
 /**
  * Update call with ASR confidence data
@@ -13,6 +38,7 @@ export const updateCallASRData = mutation({
     asrConfidence: v.number(),
     languageDetected: v.string(),
     fallbackTriggered: v.boolean(),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Find the call by callId using index (O(1) instead of full-table scan)
@@ -25,6 +51,8 @@ export const updateCallASRData = mutation({
       console.error(`[updateCallASRData] Call not found: ${args.callId}`);
       return null;
     }
+
+    await requireTenantAccessOrInternal(ctx, call.restaurantId ?? "", args.internalSecret);
 
     // Update the call with ASR data
     await ctx.db.patch(call._id, {
@@ -48,12 +76,13 @@ export const updateCallASRData = mutation({
  * Used by authorization utility to resolve call → restaurantId
  */
 export const getCallByCallId = query({
-  args: { callId: v.string() },
+  args: { callId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const call = await ctx.db
       .query("calls")
       .withIndex("by_call_and_order_id", (q) => q.eq("callId", args.callId))
       .first();
+    await requireTenantAccessOrInternal(ctx, call?.restaurantId ?? "", args.internalSecret);
     return call ?? null;
   },
 });
@@ -62,8 +91,9 @@ export const getCallByCallId = query({
 
 
 export const getCallsByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -76,8 +106,13 @@ export const getCallsByRestaurant = query({
 
 // Get calls by branch
 export const getCallsByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -89,8 +124,9 @@ export const getCallsByBranch = query({
 });
 
 export const getActiveCallsByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -104,8 +140,13 @@ export const getActiveCallsByRestaurant = query({
 
 // Get active calls by branch
 export const getActiveCallsByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -118,8 +159,9 @@ export const getActiveCallsByBranch = query({
 });
 
 export const getPastCallsByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -133,8 +175,13 @@ export const getPastCallsByRestaurant = query({
 
 // Get past calls by branch
 export const getPastCallsByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -147,8 +194,14 @@ export const getPastCallsByBranch = query({
 });
 
 export const getTranscriptsByCallId = query({
-  args: { callId: v.string() },
+  args: { callId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    // Transcripts are call content (PII) — scope to the owning tenant.
+    await requireTenantAccessOrInternal(
+      ctx,
+      await callRestaurantId(ctx, args.callId),
+      args.internalSecret
+    );
     const transcripts = await ctx.db
       .query("transcripts")
       .withIndex("by_call_id", (q) => q.eq("callId", args.callId))
@@ -178,9 +231,13 @@ export const updateCall = mutation({
     asrConfidence: v.optional(v.number()),
     languageDetected: v.optional(v.string()),
     fallbackTriggered: v.optional(v.boolean()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { callId, ...updates } = args;
+    const { callId, internalSecret, ...updates } = args;
+
+    const existing = await ctx.db.get(callId);
+    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", internalSecret);
 
     await ctx.db.patch(callId, updates);
     return callId;
@@ -198,8 +255,10 @@ export const getCallsWithLowConfidence = query({
   args: { 
     restaurantId: v.string(),
     confidenceThreshold: v.optional(v.number()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const threshold = args.confidenceThreshold ?? 0.7; // Default 70% threshold per requirement 16.5
     
     const calls = await ctx.db
@@ -223,8 +282,9 @@ export const getCallsWithLowConfidence = query({
  * @requirements 16.4 - Log ASR confidence scores for Nigerian English transcriptions
  */
 export const getASRMetrics = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))

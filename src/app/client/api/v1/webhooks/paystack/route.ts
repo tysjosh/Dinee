@@ -346,7 +346,7 @@ async function handlePaymentSuccess(
 
   try {
     // Look up order to get restaurantId
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
@@ -357,6 +357,7 @@ async function handlePaymentSuccess(
       paymentStatus: "paid",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),
+      ...internalSecretArg(),
     });
 
     logger.info(`Paystack webhook: Order ${orderId} payment status updated to "paid"`, { orderId });
@@ -381,7 +382,7 @@ async function handlePaymentFailure(
 
   try {
     // Look up order to get restaurantId
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
@@ -392,6 +393,7 @@ async function handlePaymentFailure(
       paymentStatus: "failed",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),
+      ...internalSecretArg(),
     });
 
     logger.info(`Paystack webhook: Order ${orderId} payment status updated to "failed"`, { orderId });
@@ -423,7 +425,7 @@ async function handleRefund(
 
   try {
     // Look up order to get restaurantId
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
@@ -434,6 +436,7 @@ async function handleRefund(
       paymentStatus: "refunded",
       paymentReference: payload.data.reference,
       paymentTimestamp: Date.now(),
+      ...internalSecretArg(),
     });
 
     logger.info(`Paystack webhook: Order ${orderId} payment status updated to "refunded"`, { orderId });

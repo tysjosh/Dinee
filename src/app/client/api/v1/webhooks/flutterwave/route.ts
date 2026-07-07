@@ -17,6 +17,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { FlutterwaveProvider } from "@/lib/payment/FlutterwaveProvider";
 import { createLogger } from "@/lib/logger";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 const logger = createLogger("webhook-flutterwave");
 
@@ -352,7 +353,7 @@ async function handlePaymentSuccess(
 
   try {
     // Look up order to get restaurantId
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
@@ -363,6 +364,7 @@ async function handlePaymentSuccess(
       paymentStatus: "paid",
       paymentReference: payload.data.flw_ref || payload.data.tx_ref,
       paymentTimestamp: Date.now(),
+      ...internalSecretArg(),
     });
 
     logger.info(`Flutterwave webhook: Order ${orderId} payment status updated to "paid"`, { orderId });
@@ -387,7 +389,7 @@ async function handlePaymentFailure(
 
   try {
     // Look up order to get restaurantId
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
@@ -398,6 +400,7 @@ async function handlePaymentFailure(
       paymentStatus: "failed",
       paymentReference: payload.data.flw_ref || payload.data.tx_ref,
       paymentTimestamp: Date.now(),
+      ...internalSecretArg(),
     });
 
     logger.info(`Flutterwave webhook: Order ${orderId} payment status updated to "failed"`, { orderId });

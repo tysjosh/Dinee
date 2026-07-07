@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 // ============================================================================
 // Types
@@ -424,7 +425,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StatusUpd
   
   try {
     // Get the order to verify it exists and check rider assignment
-    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const order = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     
     if (!order) {
       logAuditEntry({
@@ -490,11 +491,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<StatusUpd
       deliveryFailureReason: failureReason,
       sendStatusMessage: true,
       estimatedDeliveryMinutes,
+      ...internalSecretArg(),
     });
     
     // Fetch the updated order to return in response
     // @requirements 15.6 - Return updated order details in the response
-    const updatedOrder = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId });
+    const updatedOrder = await convexClient.query(api.orders.getOrderByOrderIdOnly, { orderId, ...internalSecretArg() });
     
     // Log successful API call
     logAuditEntry({

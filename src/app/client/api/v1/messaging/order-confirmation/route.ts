@@ -19,6 +19,7 @@ import {
   formatOrderItems,
   formatNaira,
 } from "@/lib/messaging/MessagingService";
+import { internalSecretArg } from "@/lib/internal-auth";
 import type { Order } from "@/types/global.d";
 import type { OptInStatus, MessageResult } from "@/lib/messaging/types";
 
@@ -73,6 +74,7 @@ async function fetchOrder(
   try {
     const orderDoc = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
+      ...internalSecretArg(),
     });
 
     if (!orderDoc) {
@@ -166,6 +168,7 @@ async function updateOrderWithMessageId(
     // First get the order to get its _id
     const orderDoc = await convexClient.query(api.orders.getOrderByOrderIdOnly, {
       orderId,
+      ...internalSecretArg(),
     });
 
     if (orderDoc) {
@@ -173,6 +176,7 @@ async function updateOrderWithMessageId(
       await convexClient.mutation(api.orders.updateOrder, {
         orderId: orderDoc._id,
         whatsappMessageIds: [...existingMessageIds, messageId],
+        ...internalSecretArg(),
       });
     }
   } catch (error) {
