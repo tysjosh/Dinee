@@ -264,6 +264,57 @@ export const getUsersByTenant = query({
 });
 
 /**
+ * List the branch-scoped staff (branch_manager / supervisor) for a tenant, for
+ * the owner's staff → branch assignment surface. Owner-only within the tenant
+ * (platform admins pass too). Returns a compact, non-sensitive projection
+ * including each staff member's current `assignedBranchIds`.
+ *
+ * Staff rows share the owner's `tenantId` but their `tenantType` can vary
+ * (restaurant / business / branch depending on how they were provisioned), so
+ * this reads the `by_tenant` index across those candidate types and de-dupes.
+ */
+export const getStaffByTenant = query({
+  args: { tenantId: v.string() },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, args.tenantId, TENANT_OWNER_ROLES);
+
+    const candidateTypes: TenantType[] = ["restaurant", "business", "branch"];
+    const seen = new Set<string>();
+    const staff: {
+      userId: string | undefined;
+      email: string | undefined;
+      role: string | undefined;
+      assignedBranchIds: string[];
+    }[] = [];
+
+    for (const tenantType of candidateTypes) {
+      const rows = await ctx.db
+        .query("users")
+        .withIndex("by_tenant", (q) =>
+          q.eq("tenantType", tenantType).eq("tenantId", args.tenantId)
+        )
+        .collect();
+      for (const u of rows) {
+        if (
+          (u.role === "branch_manager" || u.role === "supervisor") &&
+          !seen.has(u._id)
+        ) {
+          seen.add(u._id);
+          staff.push({
+            userId: u.userId,
+            email: u.email,
+            role: u.role,
+            assignedBranchIds: u.assignedBranchIds ?? [],
+          });
+        }
+      }
+    }
+
+    return staff;
+  },
+});
+
+/**
  * Get all users
  */
 export const getAllUsers = query({

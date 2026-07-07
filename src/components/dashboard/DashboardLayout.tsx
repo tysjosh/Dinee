@@ -11,6 +11,10 @@ import BillingDashboardContainer from "./BillingDashboardContainer";
 import BillingReminderBanner from "./BillingReminderBanner";
 import { useEnabledModules } from "@/hooks/useEnabledModules";
 import { useTenant } from "@/contexts/TenantContext";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+
+/** Roles that fully control a tenant (billing, tenant-wide settings). */
+const OWNER_ROLES = ["restaurant_owner", "business_owner", "platform_admin"];
 
 const inter = Inter({
   subsets: ["latin"],
@@ -63,7 +67,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const skipLinkRef = useRef<HTMLAnchorElement>(null);
   const { isModuleActive } = useEnabledModules();
   const { state: tenantState, actions: tenantActions } = useTenant();
-  const isPlatformAdmin = tenantState.userRole === "platform_admin";
+  const { user } = useCurrentUser();
+  // Resolve role from the authenticated user record (includes business_owner,
+  // which the tenant context's UserRole union omits), falling back to the
+  // tenant context. Owner/admin gate the tenant-wide surfaces (Billing,
+  // Settings); operational roles (branch_manager / supervisor) only get the
+  // day-to-day Calls/Orders/Shipments views.
+  const role = user?.role ?? tenantState.userRole;
+  const isPlatformAdmin = role === "platform_admin";
+  const isOwnerOrAdmin = OWNER_ROLES.includes(role ?? "");
   const router = useRouter();
   const { signOut } = useAuthActions();
 
@@ -176,7 +188,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       });
     }
 
-    // Billing tab (Req 1.1)
+    // Billing tab (Req 1.1) — owner/admin only; operational roles don't manage
+    // billing.
+    if (isOwnerOrAdmin) {
     coreTabs.push({
       id: "billing",
       label: "Billing",
@@ -198,9 +212,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         </svg>
       ),
     });
+    }
 
     return coreTabs;
-  }, [isModuleActive, isPlatformAdmin]);
+  }, [isModuleActive, isPlatformAdmin, isOwnerOrAdmin]);
 
   const handleKeyDown = (event: React.KeyboardEvent, tabId: TabType) => {
     const currentIndex = tabs.findIndex((tab) => tab.id === tabId);
@@ -306,6 +321,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 </span>
               </div>
 
+              {isOwnerOrAdmin && (
               <button
                 onClick={() => setActiveTab("settings")}
                 className="p-2 text-gray-400 hover:text-white hover:bg-emerald-500/20 rounded-lg transition-all duration-200 cursor-pointer"
@@ -331,6 +347,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   />
                 </svg>
               </button>
+              )}
 
               <button
                 onClick={handleSignOut}
@@ -429,9 +446,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             return null;
           })}
 
-          {activeTab === "settings" && <SettingsSection tabId="settings" />}
+          {activeTab === "settings" && isOwnerOrAdmin && (
+            <SettingsSection tabId="settings" />
+          )}
           {activeTab === "kpi" && isPlatformAdmin && <KpiDashboard tabId="kpi" />}
-          {activeTab === "billing" && (
+          {activeTab === "billing" && isOwnerOrAdmin && (
             <BillingDashboardContainer tabId="billing" />
           )}
         </div>

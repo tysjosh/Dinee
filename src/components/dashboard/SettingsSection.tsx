@@ -10,7 +10,12 @@ import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useBusinessStorage } from "@/hooks/useBusinessStorage";
 import { useEnabledModules } from "@/hooks/useEnabledModules";
 import TeamInvitations from "./TeamInvitations";
+import BranchManagement from "./BranchManagement";
+import StaffBranchAssignment from "./StaffBranchAssignment";
 import PhoneNumberManagement from "./PhoneNumberManagement";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+
+const OWNER_ROLES = ["restaurant_owner", "business_owner", "platform_admin"];
 
 export interface SettingsSectionProps {
   tabId: "settings";
@@ -37,6 +42,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
   const { isModuleActive } = useEnabledModules();
   const showMenuManagement = isModuleActive("restaurant_pack");
   const showRunsheetConnect = isModuleActive("runsheet_connect");
+  const { user } = useCurrentUser();
+  const isOwner = OWNER_ROLES.includes(user?.role ?? "");
 
   // Check if branch has a dedicated phone number (Req 11.4, 11.5)
   const dedicatedNumber = useQuery(
@@ -478,6 +485,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = () => {
 
       {/* Team Invitations */}
       <TeamInvitations />
+
+      {/* Owner-only: branch management + staff branch assignment */}
+      {isOwner && restaurantId && (
+        <>
+          <BranchManagement restaurantId={restaurantId} />
+          <StaffBranchAssignment restaurantId={restaurantId} />
+        </>
+      )}
 
       {/* Save Section */}
       <div className="card-minimal rounded-xl">
