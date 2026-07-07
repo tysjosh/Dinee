@@ -53,6 +53,9 @@ export const createInvitation = mutation({
       email: args.email.toLowerCase().trim(),
       role: args.role,
       tenantId: args.tenantId,
+      // Snapshot the tenant's type from the owner so the invitee is stamped
+      // with the same (vertical-agnostic) tenantType when they sign up.
+      tenantType: caller.tenantType,
       invitedBy: caller.userId ?? "",
       inviteToken: tokenHash,
       status: "pending",

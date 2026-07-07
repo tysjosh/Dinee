@@ -23,6 +23,7 @@ export default function SignUpPage() {
 
   const { signIn } = useAuthActions();
   const upsertCurrentUserProfile = useMutation(api.users.upsertCurrentUserProfile);
+  const acceptInvitation = useMutation(api.invitations.acceptInvitation);
 
   // Look up invitation if token is present (query will be wired when invitations module is created)
   const invitation = useQuery(
@@ -96,14 +97,20 @@ export default function SignUpPage() {
     setIsSubmitting(true);
 
     try {
-      // Determine role and tenantId from invitation or defaults
-      const role = invitation?.status === "pending" && invitation?.role
+      // Determine role/tenant from an accepted invitation, or fall back to a
+      // fresh owner. tenantType is vertical-agnostic: an invitee inherits the
+      // tenant's type snapshotted on the invitation; a brand-new owner has not
+      // picked a vertical yet, so we use the neutral "business" default, which
+      // onboarding corrects (restaurant/business/...) via setCurrentUserTenant.
+      const isInvited = invitation?.status === "pending";
+      const role = isInvited && invitation?.role
         ? invitation.role
         : "restaurant_owner";
-      const tenantId = invitation?.status === "pending" && invitation?.tenantId
+      const tenantId = isInvited && invitation?.tenantId
         ? invitation.tenantId
         : "";
-      const tenantType = tenantId ? "restaurant" : "restaurant";
+      const tenantType: "platform" | "restaurant" | "business" | "branch" =
+        isInvited && invitation?.tenantType ? invitation.tenantType : "business";
 
       // Step 1: Sign up via Convex Auth (creates the auth account + session and
       // the single users row).
@@ -119,8 +126,22 @@ export default function SignUpPage() {
         tenantId,
       });
 
-      // Step 3: Redirect to onboarding
-      router.push("/client/onboarding");
+      // Step 3: For an invited staff member, mark the invitation accepted so it
+      // is single-use and the owner's team list reflects reality. Non-fatal:
+      // the user is already provisioned, so a failure here should not block
+      // sign-in.
+      if (isInvited && inviteToken) {
+        try {
+          await acceptInvitation({ inviteToken });
+        } catch (acceptErr) {
+          console.error("Failed to mark invitation accepted:", acceptErr);
+        }
+      }
+
+      // Step 4: Invited staff already belong to a tenant — send them straight to
+      // the dashboard. A new owner goes through onboarding to create their
+      // tenant.
+      router.push(tenantId ? "/client/dashboard" : "/client/onboarding");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
 

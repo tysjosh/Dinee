@@ -1132,6 +1132,16 @@ export default defineSchema({
       v.literal("supervisor")
     ),
     tenantId: v.string(),
+    // The tenant's type, snapshotted from the inviting owner so an accepting
+    // staff member is stamped with the SAME tenantType as the tenant (vertical-
+    // agnostic — restaurant/business/etc.), rather than a hardcoded default.
+    // Optional so pre-existing invitations validate unchanged.
+    tenantType: v.optional(v.union(
+      v.literal("platform"),
+      v.literal("restaurant"),
+      v.literal("business"),
+      v.literal("branch")
+    )),
     invitedBy: v.string(),
     inviteToken: v.string(),
     status: v.union(
