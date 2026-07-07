@@ -1,5 +1,9 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+
+// Branch functions serve the dashboard (session) and the partner API (server,
+// forwards the internal secret). Access is scoped to the owning tenant.
 
 // Operating hours validator for a single day
 const dayHoursValidator = v.optional(
@@ -69,8 +73,10 @@ export const createBranch = mutation({
     phoneNumber: v.string(),
     operatingHours: v.optional(operatingHoursValidator),
     isActive: v.optional(v.boolean()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Generate unique branch ID
     let branchId: string;
     let existingBranch;
@@ -105,13 +111,14 @@ export const createBranch = mutation({
  * Get a branch by branchId
  */
 export const getBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const branch = await ctx.db
       .query("branches")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .first();
 
+    await requireTenantAccessOrInternal(ctx, branch?.restaurantId ?? "", args.internalSecret);
     return branch;
   },
 });
@@ -120,8 +127,9 @@ export const getBranch = query({
  * Get all branches for a specific restaurant
  */
 export const getBranchesByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const branches = await ctx.db
       .query("branches")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -135,8 +143,9 @@ export const getBranchesByRestaurant = query({
  * Get all active branches for a specific restaurant
  */
 export const getActiveBranchesByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const branches = await ctx.db
       .query("branches")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -148,12 +157,13 @@ export const getActiveBranchesByRestaurant = query({
 });
 
 /**
- * Get all branches
+ * Get all branches (platform-wide) — admins only.
  */
 export const getAllBranches = query({
   args: {},
   handler: async (ctx) => {
-    const branches = await ctx.db.query("branches").collect();
+    await requirePlatformAdmin(ctx);
+    const branches = await ctx.db.query("branches").take(1000);
     return branches;
   },
 });
@@ -169,6 +179,7 @@ export const updateBranch = mutation({
     phoneNumber: v.optional(v.string()),
     operatingHours: v.optional(operatingHoursValidator),
     isActive: v.optional(v.boolean()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const branch = await ctx.db
@@ -179,6 +190,8 @@ export const updateBranch = mutation({
     if (!branch) {
       throw new Error("Branch not found");
     }
+
+    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
 
     // Build updates object with only provided fields
     const updates: {
@@ -226,6 +239,7 @@ export const updateBranchOperatingHours = mutation({
     friday: dayHoursValidator,
     saturday: dayHoursValidator,
     sunday: dayHoursValidator,
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const branch = await ctx.db
@@ -236,6 +250,8 @@ export const updateBranchOperatingHours = mutation({
     if (!branch) {
       throw new Error("Branch not found");
     }
+
+    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
 
     // Merge existing operating hours with updates
     const updatedHours: OperatingHours = {
@@ -274,7 +290,7 @@ export const updateBranchOperatingHours = mutation({
  * Activate a branch
  */
 export const activateBranch = mutation({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const branch = await ctx.db
       .query("branches")
@@ -285,6 +301,7 @@ export const activateBranch = mutation({
       throw new Error("Branch not found");
     }
 
+    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
     await ctx.db.patch(branch._id, { isActive: true });
 
     return branch._id;
@@ -295,7 +312,7 @@ export const activateBranch = mutation({
  * Deactivate a branch
  */
 export const deactivateBranch = mutation({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const branch = await ctx.db
       .query("branches")
@@ -306,6 +323,7 @@ export const deactivateBranch = mutation({
       throw new Error("Branch not found");
     }
 
+    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
     await ctx.db.patch(branch._id, { isActive: false });
 
     return branch._id;
@@ -316,7 +334,7 @@ export const deactivateBranch = mutation({
  * Delete a branch
  */
 export const deleteBranch = mutation({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const branch = await ctx.db
       .query("branches")
@@ -327,6 +345,7 @@ export const deleteBranch = mutation({
       throw new Error("Branch not found");
     }
 
+    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
     await ctx.db.delete(branch._id);
 
     return { success: true, branchId: args.branchId };
@@ -337,8 +356,9 @@ export const deleteBranch = mutation({
  * Count branches for a restaurant
  */
 export const countBranchesByRestaurant = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const branches = await ctx.db
       .query("branches")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))

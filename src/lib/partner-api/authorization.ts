@@ -13,6 +13,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { internalSecretArg } from "@/lib/internal-auth";
 
 // ============================================================================
 // Types
@@ -117,7 +118,7 @@ async function resolveParentRestaurantId(
     case "menu": {
       const menuItem = await convexClient.query(
         api.menuItems.getMenuItemById,
-        { id: resourceId as Id<"menuItems"> }
+        { id: resourceId as Id<"menuItems">, ...internalSecretArg() }
       );
       return menuItem?.restaurantId ?? null;
     }
@@ -125,6 +126,7 @@ async function resolveParentRestaurantId(
     case "branch": {
       const branch = await convexClient.query(api.branches.getBranch, {
         branchId: resourceId,
+        ...internalSecretArg(),
       });
       return branch?.restaurantId ?? null;
     }

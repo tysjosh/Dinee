@@ -15,6 +15,7 @@ import { validateApiRequest } from '@/lib/partner-api/middleware';
 import { getRateLimitHeaders, checkRateLimit } from '@/lib/partner-api/rate-limiter';
 import { authorizeResourceAccess } from '@/lib/partner-api/authorization';
 import { logPartnerApiAudit } from '@/lib/partner-api/auditLogger';
+import { internalSecretArg } from '@/lib/internal-auth';
 import type { ApiErrorResponse, ApiSuccessResponse } from '@/lib/partner-api/types';
 
 // ============================================================================
@@ -112,6 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     // Get menu items
     const menuItems = await convexClient.query(api.menuItems.getMenuItems, {
       restaurantId,
+      ...internalSecretArg(),
     });
     
     // Filter by branch if specified

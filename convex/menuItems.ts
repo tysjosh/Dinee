@@ -1,5 +1,13 @@
 import { mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { requireTenantAccessOrInternal } from "./shared/ownership";
+
+// Menu functions serve the dashboard (session) and server routes (partner API,
+// which forwards the internal secret). Reads/writes are scoped to the owning
+// tenant, or allowed for a trusted server caller carrying INTERNAL_API_KEY.
+// Note: the voice runtime reads menus via the secret-guarded
+// `internal.getRestaurantAndMenuDetailsUsingId`, not these functions.
 
 // Create menu items for a restaurant (optionally for a specific branch)
 export const createMenuItems = mutation({
@@ -18,8 +26,10 @@ export const createMenuItems = mutation({
       }))),
       isAvailable: v.optional(v.boolean()),
     })),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const { restaurantId, branchId, menuItems } = args;
 
     // Delete existing menu items for this restaurant/branch
@@ -70,8 +80,9 @@ export const createMenuItems = mutation({
 
 // Get menu items for a restaurant
 export const getMenuItems = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     return await ctx.db
       .query("menuItems")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -79,20 +90,44 @@ export const getMenuItems = query({
   },
 });
 // Get a single menu item by its Convex document ID
-// Used by authorization utility to resolve menuItem → restaurantId
+// Used by the partner-API authorization layer (server) to resolve
+// menuItem → restaurantId, so it accepts the internal secret.
 export const getMenuItemById = query({
-  args: { id: v.id("menuItems") },
+  args: { id: v.id("menuItems"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const item = await ctx.db.get(args.id);
+    await requireTenantAccessOrInternal(
+      ctx,
+      item?.restaurantId ?? "",
+      args.internalSecret
+    );
+    return item;
   },
 });
 
 
 
+// Resolve a branchId to its owning restaurantId for tenant checks.
+async function branchRestaurantId(
+  ctx: QueryCtx,
+  branchId: string
+): Promise<string> {
+  const branch = await ctx.db
+    .query("branches")
+    .withIndex("by_branch_id", (q) => q.eq("branchId", branchId))
+    .first();
+  return branch?.restaurantId ?? "";
+}
+
 // Get menu items for a specific branch
 export const getMenuItemsByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     return await ctx.db
       .query("menuItems")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -102,8 +137,9 @@ export const getMenuItemsByBranch = query({
 
 // Get available menu items for a restaurant
 export const getAvailableMenuItems = query({
-  args: { restaurantId: v.string() },
+  args: { restaurantId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
     const items = await ctx.db
       .query("menuItems")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
@@ -115,8 +151,13 @@ export const getAvailableMenuItems = query({
 
 // Get available menu items for a specific branch
 export const getAvailableMenuItemsByBranch = query({
-  args: { branchId: v.string() },
+  args: { branchId: v.string(), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireTenantAccessOrInternal(
+      ctx,
+      await branchRestaurantId(ctx, args.branchId),
+      args.internalSecret
+    );
     const items = await ctx.db
       .query("menuItems")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
@@ -141,29 +182,35 @@ export const updateMenuItem = mutation({
       price: v.number(),
     }))),
     isAvailable: v.optional(v.boolean()),
+    internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { id, ...updates } = args;
+    const { id, internalSecret, ...updates } = args;
+    const existing = await ctx.db.get(id);
+    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", internalSecret);
     return await ctx.db.patch(id, updates);
   },
 });
 
 // Delete a menu item
 export const deleteMenuItem = mutation({
-  args: { id: v.id("menuItems") },
+  args: { id: v.id("menuItems"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
     return await ctx.db.delete(args.id);
   },
 });
 
 // Toggle menu item availability
 export const toggleMenuItemAvailability = mutation({
-  args: { id: v.id("menuItems") },
+  args: { id: v.id("menuItems"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const item = await ctx.db.get(args.id);
     if (!item) {
       throw new Error("Menu item not found");
     }
+    await requireTenantAccessOrInternal(ctx, item.restaurantId, args.internalSecret);
     const newAvailability = item.isAvailable === false ? true : false;
     await ctx.db.patch(args.id, { isAvailable: newAvailability });
     return newAvailability;

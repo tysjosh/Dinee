@@ -135,6 +135,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiSuccess
     for (const restaurantId of accessibleRestaurantIds) {
       const branches = await convexClient.query(api.branches.getBranchesByRestaurant, {
         restaurantId,
+        ...internalSecretArg(),
       });
       
       for (const branch of branches) {
