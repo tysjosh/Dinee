@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import {
@@ -139,7 +139,6 @@ export const setCurrentUserTenant = mutation({
 export const createUser = mutation({
   args: {
     email: v.string(),
-    passwordHash: v.string(),
     role: userRoleValidator,
     tenantType: tenantTypeValidator,
     tenantId: v.string(),
@@ -170,7 +169,6 @@ export const createUser = mutation({
     const docId = await ctx.db.insert("users", {
       userId,
       email: args.email,
-      passwordHash: args.passwordHash,
       role: args.role,
       tenantType: args.tenantType,
       tenantId: args.tenantId,
@@ -284,7 +282,6 @@ export const updateUser = mutation({
   args: {
     userId: v.string(),
     email: v.optional(v.string()),
-    passwordHash: v.optional(v.string()),
     role: v.optional(userRoleValidator),
     tenantType: v.optional(tenantTypeValidator),
     tenantId: v.optional(v.string()),
@@ -318,7 +315,6 @@ export const updateUser = mutation({
     // Build updates object with only provided fields
     const updates: {
       email?: string;
-      passwordHash?: string;
       role?: UserRole;
       tenantType?: TenantType;
       tenantId?: string;
@@ -326,9 +322,6 @@ export const updateUser = mutation({
 
     if (args.email !== undefined) {
       updates.email = args.email;
-    }
-    if (args.passwordHash !== undefined) {
-      updates.passwordHash = args.passwordHash;
     }
     if (args.role !== undefined) {
       updates.role = args.role;
@@ -410,5 +403,39 @@ export const getUsersByRole = query({
       .collect();
 
     return users;
+  },
+});
+
+/**
+ * MIGRATION (one-time): strip the legacy `passwordHash` field from user rows.
+ *
+ * `passwordHash` is dead data — Convex Auth stores credentials in its own
+ * `authAccounts` table, never in `users.passwordHash`. Removing the schema
+ * field requires that no stored document still carries it, so run this against
+ * each environment BEFORE deploying the schema-field removal:
+ *
+ *   npx convex run users:stripLegacyPasswordHash
+ *
+ * It processes one page per invocation and returns `{ done, cursor }`; re-run
+ * (passing the returned cursor) until `done` is true. Idempotent — rows without
+ * the field are left untouched.
+ */
+export const stripLegacyPasswordHash = internalMutation({
+  args: { cursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("users")
+      .paginate({ cursor: args.cursor ?? null, numItems: 200 });
+
+    let cleared = 0;
+    for (const user of page.page) {
+      // Field is optional in the current schema; clear it by patching undefined.
+      if ((user as { passwordHash?: string }).passwordHash !== undefined) {
+        await ctx.db.patch(user._id, { passwordHash: undefined });
+        cleared += 1;
+      }
+    }
+
+    return { done: page.isDone, cursor: page.continueCursor, cleared };
   },
 });
