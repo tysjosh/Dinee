@@ -30,6 +30,7 @@
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "../_generated/server";
+import { authorizeIntegrationConfigAccess } from "./authorization";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -382,6 +383,26 @@ export const getConfigForRuntimeInternal = internalQuery({
 });
 
 /**
+ * Authorization seam for the node-runtime Integration_Admin actions
+ * (`saveIntegrationConfig` / `testIntegrationCredential`).
+ *
+ * Those actions run in the `"use node"` isolate and have no `ctx.db`, so they
+ * cannot resolve the caller's `users` record themselves. They call this thin
+ * `internalQuery` via `ctx.runQuery` FIRST — it runs in the default runtime
+ * with the SAME propagated auth identity and delegates to the shared
+ * `authorizeIntegrationConfigAccess` gate, which throws (failing the action) on
+ * denial. Returns `null` on success so a rejected save/test never touches
+ * credentials.
+ */
+export const authorizeConfigAccess = internalQuery({
+  args: { platformId: v.string(), tenantId: v.string() },
+  handler: async (ctx, args): Promise<null> => {
+    await authorizeIntegrationConfigAccess(ctx, args.platformId, args.tenantId);
+    return null;
+  },
+});
+
+/**
  * Public, masked view of an Integration_Config for the admin UI.
  *
  * Never returns the encrypted credentials OR any decrypted value — only the
@@ -391,6 +412,12 @@ export const getConfigForRuntimeInternal = internalQuery({
 export const getMaskedConfig = query({
   args: { platformId: v.string(), tenantId: v.string() },
   handler: async (ctx, args): Promise<MaskedIntegrationConfig | null> => {
+    // Gate: only a platform admin, the owner of this tenant, or a partner whose
+    // scope includes the pair may read the (masked) integration config. Fails
+    // closed so branch/supervisor/other roles and cross-tenant callers cannot
+    // enumerate another tenant's integration configuration (even last-4 hints).
+    await authorizeIntegrationConfigAccess(ctx, args.platformId, args.tenantId);
+
     const row = await ctx.db
       .query("integrations")
       .withIndex("by_platform_tenant", (q) =>

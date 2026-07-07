@@ -1,6 +1,7 @@
 import { mutation, query } from "../_generated/server";
 import { v } from "convex/values";
 import { isConversationTypeAllowed } from "../runsheet/numberAssignments";
+import { authorizeIntegrationConfigAccess } from "./authorization";
 
 /**
  * Generic multi-platform phone-number -> route store (Dinee-owned).
@@ -46,6 +47,12 @@ export const savePhoneRoute = mutation({
     conversationType: v.string(),
   },
   handler: async (ctx, args) => {
+    // Authorize FIRST — routing an inbound number binds it to a tenant's
+    // integration, so only a platform admin, the owner of args.tenantId, or a
+    // partner whose scope includes the pair may save a route. Fails closed
+    // before any read/write so existing routes are left unchanged on denial.
+    await authorizeIntegrationConfigAccess(ctx, args.platformId, args.tenantId);
+
     // Resolve the tenant's integration config for this platform to read its
     // allowed conversation types.
     const integration = await ctx.db

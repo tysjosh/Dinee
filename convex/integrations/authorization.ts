@@ -22,6 +22,12 @@
 
 import { api } from "../_generated/api";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
+import {
+  getCurrentUserRecord,
+  isPlatformAdmin,
+  TENANT_OWNER_ROLES,
+  type AppRole,
+} from "../shared/ownership";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -191,4 +197,71 @@ export async function requireActor(ctx: AnyCtx): Promise<ActorResolution> {
   }
 
   return resolveActorFromUser(user);
+}
+
+/**
+ * Authorize a session caller to read or write the Integration_Config for a
+ * `(platformId, tenantId)` pair. Throws "Forbidden"/"Unauthorized" on denial so
+ * the caller fails closed and performs NO read/write.
+ *
+ * This is the single authorization gate the base Integration_Admin entry points
+ * enforce so they are safe even when invoked DIRECTLY (bypassing the scoped
+ * Control-Plane wrappers). It admits three principals:
+ *
+ *   1. `platform_admin` — unrestricted across all tenants.
+ *   2. a tenant owner (`restaurant_owner` / `business_owner`) whose own
+ *      `tenantId` equals the target `tenantId` — the per-tenant admin surface
+ *      (`PlatformIntegrationAdmin`) that calls these entry points directly.
+ *   3. a `partner` whose Authorization_Scope (explicit pair override, else
+ *      derived from `tenantId`) contains the target pair — matching the scope
+ *      the Control-Plane wrappers enforce, so the wrapper→base delegation path
+ *      (which propagates the caller's identity) still passes.
+ *
+ * Branch managers / supervisors and any other role are denied: integration
+ * credentials are an owner/admin surface, not an operational one.
+ *
+ * Works from query/mutation contexts directly; the node-runtime actions call it
+ * through a thin `internalQuery` wrapper (they lack `ctx.db`), which runs with
+ * the same propagated auth identity.
+ */
+export async function authorizeIntegrationConfigAccess(
+  ctx: QueryCtx | MutationCtx,
+  platformId: string,
+  tenantId: string
+): Promise<void> {
+  const user = await getCurrentUserRecord(ctx);
+  if (!user) {
+    throw new Error("Unauthorized: authentication required");
+  }
+
+  // 1. Platform admin — unrestricted.
+  if (isPlatformAdmin(user)) return;
+
+  // 2. Tenant owner acting on their OWN tenant.
+  if (
+    user.role &&
+    TENANT_OWNER_ROLES.includes(user.role as AppRole) &&
+    user.tenantId === tenantId
+  ) {
+    return;
+  }
+
+  // 3. Partner whose Authorization_Scope contains the target pair.
+  if (user.role === "partner") {
+    const resolution = resolveActorFromUser({
+      role: user.role,
+      tenantId: user.tenantId,
+      authorizationScope: user.authorizationScope,
+    });
+    if (
+      resolution.ok &&
+      isPairInScope(resolution.scope, platformId, tenantId)
+    ) {
+      return;
+    }
+  }
+
+  throw new Error(
+    "Forbidden: you do not have access to this integration configuration"
+  );
 }

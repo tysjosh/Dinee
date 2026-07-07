@@ -97,6 +97,17 @@ export const saveIntegrationConfig = action({
     actorRole: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<SaveResult> => {
+    // 0. Authorize FIRST — this action has no ctx.db, so the caller (platform
+    //    admin, tenant owner of args.tenantId, or a partner whose scope includes
+    //    the pair) is resolved via an internal query running with the same
+    //    propagated auth identity. On denial it throws and NOTHING is encrypted
+    //    or written. The spoofable `actorUserId`/`actorRole` args are NEVER
+    //    trusted for this decision (they are audit-log annotations only).
+    await ctx.runQuery(
+      internal.integrations.configStore.authorizeConfigAccess,
+      { platformId: args.platformId, tenantId: args.tenantId }
+    );
+
     // 1. Resolve the platform in THIS action's runtime — the isolate where the
     //    Integration_Registry is populated (`registerRunsheetPlatform()` above).
     //    The default-runtime mutation cannot see that registration, so the
@@ -170,6 +181,14 @@ export const testIntegrationCredential = action({
     tenantId: v.string(),
   },
   handler: async (ctx, args): Promise<CredentialTestResult> => {
+    // Authorize FIRST (see saveIntegrationConfig): only a platform admin, the
+    // owner of this tenant, or a partner whose scope includes the pair may probe
+    // stored credentials. On denial this throws before any decrypt/probe.
+    await ctx.runQuery(
+      internal.integrations.configStore.authorizeConfigAccess,
+      { platformId: args.platformId, tenantId: args.tenantId }
+    );
+
     // Load the stored ciphertext + config for the exact pair.
     const config: RuntimeIntegrationConfig | null = await ctx.runQuery(
       internal.integrations.configStore.getConfigForRuntimeInternal,
