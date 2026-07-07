@@ -186,11 +186,15 @@ function usesCollectThenFind(body: string): boolean {
  * (not JS Array.filter after .collect())
  */
 function usesPostIndexFilter(body: string): boolean {
-  // Match .withIndex(...) followed by .filter() BEFORE .collect()
-  // This distinguishes Convex query .filter() from JS array .filter()
-  const withIndexToCollect = body.match(/\.withIndex\([^)]+\)([\s\S]*?)\.collect\(\)/);
-  if (!withIndexToCollect) return false;
-  return /\.filter\(/.test(withIndexToCollect[1]);
+  // Match .withIndex(...) followed by .filter() BEFORE the terminal read
+  // (.collect() OR the bounded .take(...)). This distinguishes a Convex query
+  // .filter() from a JS Array.filter after materialization, and treats a
+  // bounded .take() the same as .collect() for this structural check.
+  const withIndexToTerminal = body.match(
+    /\.withIndex\([^)]+\)([\s\S]*?)\.(?:collect|take)\(/
+  );
+  if (!withIndexToTerminal) return false;
+  return /\.filter\(/.test(withIndexToTerminal[1]);
 }
 
 function extractTableIndexes(schemaSource: string, tableName: string): Record<string, string[]> {

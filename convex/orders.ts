@@ -200,7 +200,7 @@ export const getActiveOrdersByRestaurant = query({
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .filter((q) => q.eq(q.field("status"), "active"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -220,7 +220,7 @@ export const getActiveOrdersByBranch = query({
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .filter((q) => q.eq(q.field("status"), "active"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -239,7 +239,7 @@ export const getPastOrdersByRestaurant = query({
         q.eq(q.field("status"), "cancelled")
       ))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -262,7 +262,7 @@ export const getPastOrdersByBranch = query({
         q.eq(q.field("status"), "cancelled")
       ))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -282,7 +282,7 @@ export const getOrdersByPaymentStatus = query({
       .query("orders")
       .withIndex("by_payment_status", (q) => q.eq("paymentStatus", args.paymentStatus))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -304,7 +304,7 @@ export const getOrdersByDeliveryStatus = query({
       .query("orders")
       .withIndex("by_delivery_status", (q) => q.eq("deliveryStatus", args.deliveryStatus))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return orders;
   },
@@ -642,7 +642,7 @@ export const getCODOrdersByBranch = query({
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .filter((q) => q.eq(q.field("paymentMethod"), "cod"))
       .order("desc")
-      .collect();
+      .take(1000);
     
     // Filter by date if provided
     if (args.date) {

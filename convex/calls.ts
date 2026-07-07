@@ -98,7 +98,7 @@ export const getCallsByRestaurant = query({
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
@@ -117,7 +117,7 @@ export const getCallsByBranch = query({
       .query("calls")
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
@@ -132,7 +132,7 @@ export const getActiveCallsByRestaurant = query({
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .filter((q) => q.eq(q.field("status"), "active"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
@@ -152,7 +152,7 @@ export const getActiveCallsByBranch = query({
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .filter((q) => q.eq(q.field("status"), "active"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
@@ -167,7 +167,7 @@ export const getPastCallsByRestaurant = query({
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .filter((q) => q.eq(q.field("status"), "completed"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
@@ -187,7 +187,7 @@ export const getPastCallsByBranch = query({
       .withIndex("by_branch_id", (q) => q.eq("branchId", args.branchId))
       .filter((q) => q.eq(q.field("status"), "completed"))
       .order("desc")
-      .collect();
+      .take(1000);
 
     return calls;
   },
