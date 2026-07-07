@@ -122,6 +122,7 @@ export const sendOrderConfirmation = action({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(process.env.INTERNAL_API_KEY ? { "x-api-key": process.env.INTERNAL_API_KEY } : {}),
           },
           body: JSON.stringify({
             orderId,
@@ -215,6 +216,7 @@ export const sendOrderConfirmationInternal = internalAction({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(process.env.INTERNAL_API_KEY ? { "x-api-key": process.env.INTERNAL_API_KEY } : {}),
           },
           body: JSON.stringify({
             orderId,
@@ -354,6 +356,7 @@ export const sendStatusUpdate = action({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(process.env.INTERNAL_API_KEY ? { "x-api-key": process.env.INTERNAL_API_KEY } : {}),
           },
           body: JSON.stringify({
             orderId,
@@ -470,6 +473,7 @@ export const sendStatusUpdateInternal = internalAction({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(process.env.INTERNAL_API_KEY ? { "x-api-key": process.env.INTERNAL_API_KEY } : {}),
           },
           body: JSON.stringify({
             orderId,

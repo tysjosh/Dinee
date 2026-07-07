@@ -19,7 +19,7 @@ import {
   formatOrderItems,
   formatNaira,
 } from "@/lib/messaging/MessagingService";
-import { internalSecretArg } from "@/lib/internal-auth";
+import { internalSecretArg, validateInternalApiKey } from "@/lib/internal-auth";
 import type { Order } from "@/types/global.d";
 import type { OptInStatus, MessageResult } from "@/lib/messaging/types";
 
@@ -217,6 +217,16 @@ function logMessageFailure(
  * 7. Return result
  */
 export async function POST(request: NextRequest) {
+  // Server-to-server only (invoked by the Convex messaging action). Require the
+  // internal API key so this can't be abused to spam customers.
+  const auth = validateInternalApiKey(request);
+  if (!auth.valid) {
+    return NextResponse.json(
+      { success: false, error: auth.error ?? "Unauthorized", orderId: "" },
+      { status: auth.statusCode ?? 401 }
+    );
+  }
+
   let body: OrderConfirmationRequest;
 
   try {

@@ -14,6 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { internalSecretArg } from "@/lib/internal-auth";
@@ -106,6 +107,14 @@ const VALID_RIDER_STATUSES: RiderDeliveryStatus[] = [
  * 
  * @requirements 15.2 - Require authentication via API key
  */
+/** Timing-safe string comparison (avoids leaking the key via response timing). */
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, "utf8");
+  const bBuf = Buffer.from(b, "utf8");
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function validateApiKey(request: NextRequest): { isValid: boolean; riderId?: string } {
   // Check for API key in header
   const apiKey = request.headers.get("x-api-key") || request.headers.get("authorization")?.replace("Bearer ", "");
@@ -117,15 +126,18 @@ function validateApiKey(request: NextRequest): { isValid: boolean; riderId?: str
   // Get the expected API key from environment
   const expectedApiKey = process.env.RIDER_API_KEY;
   
-  // In development mode, allow any API key if not configured
+  // Fail CLOSED in production when the key is not configured; only bypass in
+  // local development (previously this failed open in every environment).
   if (!expectedApiKey) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("RIDER_API_KEY not configured — rejecting rider status request");
+      return { isValid: false };
+    }
     console.warn("RIDER_API_KEY not configured - allowing requests in development mode");
-    // Extract rider ID from the API key format: rider_{riderId}_{secret}
     const parts = apiKey.split("_");
     if (parts.length >= 2 && parts[0] === "rider") {
       return { isValid: true, riderId: parts[1] };
     }
-    // Default rider ID for development
     return { isValid: true, riderId: "dev-rider" };
   }
   
@@ -136,15 +148,14 @@ function validateApiKey(request: NextRequest): { isValid: boolean; riderId?: str
     const riderId = parts[1];
     const secret = parts.slice(2).join("_");
     
-    // Verify the secret portion matches the expected key
-    // In production, you would validate against a database of rider API keys
-    if (secret === expectedApiKey || apiKey === expectedApiKey) {
+    // Verify the secret portion matches the expected key (timing-safe).
+    if (safeEqual(secret, expectedApiKey) || safeEqual(apiKey, expectedApiKey)) {
       return { isValid: true, riderId };
     }
   }
   
   // Also accept a simple API key match for backward compatibility
-  if (apiKey === expectedApiKey) {
+  if (safeEqual(apiKey, expectedApiKey)) {
     // Extract rider ID from a separate header if using simple key
     const riderId = request.headers.get("x-rider-id") || "unknown";
     return { isValid: true, riderId };

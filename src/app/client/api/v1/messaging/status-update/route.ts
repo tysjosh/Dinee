@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { createMessagingServiceFromEnv } from "@/lib/messaging/MessagingService";
-import { internalSecretArg } from "@/lib/internal-auth";
+import { internalSecretArg, validateInternalApiKey } from "@/lib/internal-auth";
 import type { Order } from "@/types/global.d";
 import type { OptInStatus, MessageResult } from "@/lib/messaging/types";
 
@@ -244,6 +244,17 @@ function isValidStatus(status: string): status is MessageTriggerStatus {
  * @requirements 12.4 - Send message when order is cancelled with reason
  */
 export async function POST(request: NextRequest) {
+  // Server-to-server only (invoked by the Convex messaging action). Require the
+  // internal API key so this can't be used to enumerate orders or spam
+  // customers with messages.
+  const auth = validateInternalApiKey(request);
+  if (!auth.valid) {
+    return NextResponse.json(
+      { success: false, error: auth.error ?? "Unauthorized", orderId: "", orderStatus: "" },
+      { status: auth.statusCode ?? 401 }
+    );
+  }
+
   let body: StatusUpdateRequest;
 
   try {
