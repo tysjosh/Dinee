@@ -58,7 +58,6 @@ export default defineSchema({
     isAnonymous: v.optional(v.boolean()),
     // Custom app fields (all optional so auth-created users work)
     userId: v.optional(v.string()),
-    passwordHash: v.optional(v.string()),
     role: v.optional(v.union(
       v.literal("platform_admin"),
       v.literal("restaurant_owner"),
