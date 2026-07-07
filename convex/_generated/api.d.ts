@@ -89,7 +89,6 @@ import type * as shared_internalAuth from "../shared/internalAuth.js";
 import type * as shared_ownership from "../shared/ownership.js";
 import type * as shared_phoneProvisioningTypes from "../shared/phoneProvisioningTypes.js";
 import type * as shared_validators from "../shared/validators.js";
-import type * as signup from "../signup.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as tokenHash from "../tokenHash.js";
 import type * as users from "../users.js";
@@ -182,7 +181,6 @@ declare const fullApi: ApiFromModules<{
   "shared/ownership": typeof shared_ownership;
   "shared/phoneProvisioningTypes": typeof shared_phoneProvisioningTypes;
   "shared/validators": typeof shared_validators;
-  signup: typeof signup;
   subscriptions: typeof subscriptions;
   tokenHash: typeof tokenHash;
   users: typeof users;
