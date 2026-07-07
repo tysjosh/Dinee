@@ -1,9 +1,19 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireTenantAccessOrInternal, requirePlatformAdmin } from "./shared/ownership";
+import {
+  requireTenantAccessOrInternal,
+  requireRoleOrInternal,
+  requirePlatformAdmin,
+  TENANT_OWNER_ROLES,
+} from "./shared/ownership";
 
 // Branch functions serve the dashboard (session) and the partner API (server,
 // forwards the internal secret). Access is scoped to the owning tenant.
+//
+// Structural lifecycle ops (create / delete a branch) are owner-only for
+// session callers (requireRoleOrInternal) — branch managers and supervisors are
+// operational and must not add or remove branches. Server-to-server callers
+// (partner-API provisioning) forwarding the internal secret are unrestricted.
 
 // Operating hours validator for a single day
 const dayHoursValidator = v.optional(
@@ -76,7 +86,14 @@ export const createBranch = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    // Owner-only for session callers; partner provisioning (internal secret) is
+    // unrestricted. Branch managers / supervisors cannot create branches.
+    await requireRoleOrInternal(
+      ctx,
+      args.restaurantId,
+      TENANT_OWNER_ROLES,
+      args.internalSecret
+    );
     // Generate unique branch ID
     let branchId: string;
     let existingBranch;
@@ -345,7 +362,13 @@ export const deleteBranch = mutation({
       throw new Error("Branch not found");
     }
 
-    await requireTenantAccessOrInternal(ctx, branch.restaurantId, args.internalSecret);
+    // Owner-only for session callers; internal (server) callers unrestricted.
+    await requireRoleOrInternal(
+      ctx,
+      branch.restaurantId,
+      TENANT_OWNER_ROLES,
+      args.internalSecret
+    );
     await ctx.db.delete(branch._id);
 
     return { success: true, branchId: args.branchId };

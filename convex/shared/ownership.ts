@@ -181,6 +181,26 @@ export async function requireTenantAccessOrInternal(
 
 /**
  * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from a session user with tenant access to `restaurantId` who ALSO
+ * holds one of `allowedRoles`. Throws "Forbidden" otherwise.
+ *
+ * Use for tenant-structural operations that a trusted server route may perform
+ * (e.g. partner-API branch provisioning forwards the internal secret) but that
+ * an operational session role (branch_manager / supervisor) must not — the
+ * session path is held to owner roles while the server path is unrestricted.
+ */
+export async function requireRoleOrInternal(
+  ctx: AnyCtx,
+  restaurantId: string,
+  allowedRoles: AppRole[],
+  internalSecret: string | undefined
+): Promise<void> {
+  if (hasValidInternalSecret(internalSecret)) return;
+  await requireRole(ctx, restaurantId, allowedRoles);
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
  * secret) OR from a session user who may act on the given BRANCH.
  *
  * Server-to-server callers (Voice_Runtime, webhooks) forwarding the internal
