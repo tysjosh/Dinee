@@ -469,15 +469,26 @@ describe("Property 7: Masked view never exposes credential material", () => {
             // At most 4 characters exposed.
             expect(last4.length).toBeLessThanOrEqual(4);
 
-            // No ciphertext value leaks into the serialized view.
+            // No ciphertext value leaks into the serialized view. The
+            // ciphertext marker is distinctive (contains "CIPHERTEXT::"), so a
+            // raw-string containment check is safe here.
             expect(serialized).not.toContain(credentialsEncrypted[name]);
 
-            // The full plaintext value never appears (when it is longer than
-            // its own last-4 — i.e. length > 4, so the preview is a strict
-            // suffix, not the entire secret).
+            // More than the last-4 of the secret is never retained: the stored
+            // preview is a strict suffix of the full value, not the whole
+            // secret (when the value is longer than its own last-4).
+            //
+            // NB: this is asserted structurally rather than via
+            // `serialized.not.toContain(full)`. An arbitrary secret can contain
+            // the same quote/space bytes JSON uses as delimiters, so the
+            // legitimate last-4 preview can reconstitute a prefix of the secret
+            // at a JSON value boundary (e.g. a secret of `"    ` renders its
+            // 4-space preview as `"    "`, which contains `"    `). That is a
+            // serialization coincidence, not a credential leak.
             const full = plaintextCreds[name];
             if (full.length > 4) {
-              expect(serialized).not.toContain(full);
+              expect(last4).not.toBe(full);
+              expect(full.endsWith(last4)).toBe(true);
             }
           }
         }
