@@ -13,10 +13,37 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../../../convex/_generated/api";
 import { formatPhoneNumber } from "@/lib/messaging/MessagingService";
 import { internalSecretArg } from "@/lib/internal-auth";
+
+/**
+ * Verify Meta's `X-Hub-Signature-256` header (HMAC-SHA256 of the raw body with
+ * the app secret) using a timing-safe comparison. Fails closed when
+ * WHATSAPP_APP_SECRET is configured; allows through only in local dev when it
+ * is unset (matching the other webhook dev-bypasses).
+ */
+function verifyWhatsAppSignature(rawBody: string, signatureHeader: string | null): boolean {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) {
+    // Not configured — dev bypass. Production MUST set WHATSAPP_APP_SECRET.
+    return process.env.NODE_ENV !== "production";
+  }
+  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
+    return false;
+  }
+  const provided = signatureHeader.slice("sha256=".length);
+  const expected = crypto
+    .createHmac("sha256", appSecret)
+    .update(rawBody, "utf8")
+    .digest("hex");
+  const providedBuf = Buffer.from(provided, "hex");
+  const expectedBuf = Buffer.from(expected, "hex");
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(providedBuf, expectedBuf);
+}
 
 // ============================================================================
 // Types
@@ -327,6 +354,19 @@ export async function POST(request: NextRequest) {
   
   try {
     rawBody = await request.text();
+  } catch {
+    console.error("WhatsApp webhook: Unable to read body");
+    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  }
+
+  // Verify the HMAC signature BEFORE trusting/parsing the payload (Meta signs
+  // the raw body with the app secret). Reject forged/unsigned requests.
+  if (!verifyWhatsAppSignature(rawBody, request.headers.get("x-hub-signature-256"))) {
+    console.warn("WhatsApp webhook: invalid or missing signature");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  try {
     payload = JSON.parse(rawBody);
   } catch {
     console.error("WhatsApp webhook: Invalid JSON body");
