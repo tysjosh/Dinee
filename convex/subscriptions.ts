@@ -984,11 +984,17 @@ export const getSubscriptionUsage = query({
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
       .collect();
     
+    // Bounded scans: these feed plan-limit checks, so capping at a high value
+    // still correctly reports "over limit" for any realistic plan while never
+    // loading an unbounded history. Newest-first so recent activity counts.
+    const USAGE_SCAN_CAP = 5000;
+
     // Get calls in period
     const calls = await ctx.db
       .query("calls")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
-      .collect();
+      .order("desc")
+      .take(USAGE_SCAN_CAP);
     
     const callsInPeriod = calls.filter(
       (call) => call.callStartTime && 
@@ -1000,7 +1006,8 @@ export const getSubscriptionUsage = query({
     const orders = await ctx.db
       .query("orders")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
-      .collect();
+      .order("desc")
+      .take(USAGE_SCAN_CAP);
     
     const ordersInPeriod = orders.filter(
       (order) => order.orderPlacementTime && 
@@ -1012,7 +1019,7 @@ export const getSubscriptionUsage = query({
     const menuItems = await ctx.db
       .query("menuItems")
       .withIndex("by_restaurant_id", (q) => q.eq("restaurantId", args.restaurantId))
-      .collect();
+      .take(USAGE_SCAN_CAP);
     
     // Get team members count
     const users = await ctx.db

@@ -1,6 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
+// Safety cap on how many usage-log rows any single read scans. Reads are
+// newest-first, so recent activity (dashboards, stats windows) is preserved
+// while an ever-growing table can never blow the read/memory limit.
+const MAX_USAGE_LOG_SCAN = 5000;
+
 /**
  * API Usage Logs CRUD Operations
  * 
@@ -25,10 +30,13 @@ export const getApiUsageLogsByPartnerId = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Bounded to the newest N per partner (index-ordered desc) so a busy
+    // partner's log history never loads the whole partition into memory.
     let logs = await ctx.db
       .query("apiUsageLogs")
       .withIndex("by_partner_id", (q) => q.eq("partnerId", args.partnerId))
-      .collect();
+      .order("desc")
+      .take(MAX_USAGE_LOG_SCAN);
     
     // Filter by time range if specified
     if (args.startTime) {
@@ -38,9 +46,7 @@ export const getApiUsageLogsByPartnerId = query({
       logs = logs.filter((l) => l.createdAt <= args.endTime!);
     }
     
-    // Sort by createdAt descending
-    logs.sort((a, b) => b.createdAt - a.createdAt);
-    
+    // Already newest-first from the desc take.
     // Apply limit if specified
     if (args.limit) {
       return logs.slice(0, args.limit);
@@ -64,7 +70,8 @@ export const getApiUsageLogsByApiKeyId = query({
     let logs = await ctx.db
       .query("apiUsageLogs")
       .withIndex("by_api_key_id", (q) => q.eq("apiKeyId", args.apiKeyId))
-      .collect();
+      .order("desc")
+      .take(MAX_USAGE_LOG_SCAN);
     
     // Filter by time range if specified
     if (args.startTime) {
@@ -74,9 +81,7 @@ export const getApiUsageLogsByApiKeyId = query({
       logs = logs.filter((l) => l.createdAt <= args.endTime!);
     }
     
-    // Sort by createdAt descending
-    logs.sort((a, b) => b.createdAt - a.createdAt);
-    
+    // Already newest-first from the desc take.
     // Apply limit if specified
     if (args.limit) {
       return logs.slice(0, args.limit);
@@ -96,10 +101,12 @@ export const getApiUsageStats = query({
     endTime: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Bounded to the newest N per partner; stats reflect that recent window.
     let logs = await ctx.db
       .query("apiUsageLogs")
       .withIndex("by_partner_id", (q) => q.eq("partnerId", args.partnerId))
-      .collect();
+      .order("desc")
+      .take(MAX_USAGE_LOG_SCAN);
     
     // Filter by time range if specified
     if (args.startTime) {
@@ -160,17 +167,15 @@ export const getRecentApiUsage = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Newest-first, bounded directly by the requested limit.
+    const limit = args.limit || 100;
     const logs = await ctx.db
       .query("apiUsageLogs")
       .withIndex("by_partner_id", (q) => q.eq("partnerId", args.partnerId))
-      .collect();
-    
-    // Sort by createdAt descending
-    logs.sort((a, b) => b.createdAt - a.createdAt);
-    
-    // Apply limit (default 100)
-    const limit = args.limit || 100;
-    return logs.slice(0, limit);
+      .order("desc")
+      .take(limit);
+
+    return logs;
   },
 });
 
@@ -223,12 +228,14 @@ export const deleteOldApiUsageLogs = mutation({
   handler: async (ctx, args) => {
     const cutoffTime = Date.now() - args.olderThanDays * 24 * 60 * 60 * 1000;
     
-    const logs = await ctx.db
+    // Batched, index-range delete (was: collect entire table then filter).
+    // Deletes up to BATCH_SIZE per invocation to stay within Convex limits;
+    // schedule repeatedly to drain a large backlog.
+    const BATCH_SIZE = 500;
+    const oldLogs = await ctx.db
       .query("apiUsageLogs")
-      .withIndex("by_created_at")
-      .collect();
-    
-    const oldLogs = logs.filter((l) => l.createdAt < cutoffTime);
+      .withIndex("by_created_at", (q) => q.lt("createdAt", cutoffTime))
+      .take(BATCH_SIZE);
     
     for (const log of oldLogs) {
       await ctx.db.delete(log._id);

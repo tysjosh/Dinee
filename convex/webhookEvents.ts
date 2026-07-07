@@ -195,28 +195,27 @@ export const getUnprocessedWebhookEvents = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    let query = ctx.db.query("webhookEvents");
-    
-    // Collect all and filter since we need to filter by processed status
-    const allEvents = await query.collect();
-    
-    let filteredEvents = allEvents.filter((event) => !event.processed);
-    
+    // Bounded scan: read the newest N events (there is no index on `processed`,
+    // and unprocessed events are effectively always recent), then filter — so
+    // this never loads the whole table as it grows.
+    const MAX_SCAN = 2000;
+    const recent = await ctx.db.query("webhookEvents").order("desc").take(MAX_SCAN);
+
+    let filteredEvents = recent.filter((event) => !event.processed);
+
     // Filter by provider if specified
     if (args.provider) {
       filteredEvents = filteredEvents.filter(
         (event) => event.provider === args.provider
       );
     }
-    
-    // Sort by createdAt descending (most recent first)
-    filteredEvents.sort((a, b) => b.createdAt - a.createdAt);
-    
+
+    // `recent` is already newest-first from the desc take.
     // Apply limit if specified
     if (args.limit) {
       filteredEvents = filteredEvents.slice(0, args.limit);
     }
-    
+
     return filteredEvents;
   },
 });
@@ -233,9 +232,11 @@ export const getWebhookEventsByProvider = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const allEvents = await ctx.db.query("webhookEvents").collect();
-    
-    let filteredEvents = allEvents.filter(
+    // Bounded scan of the newest N events, then filter by provider/time range.
+    const MAX_SCAN = 2000;
+    const recent = await ctx.db.query("webhookEvents").order("desc").take(MAX_SCAN);
+
+    let filteredEvents = recent.filter(
       (event) => event.provider === args.provider
     );
     
@@ -251,9 +252,7 @@ export const getWebhookEventsByProvider = query({
       );
     }
     
-    // Sort by createdAt descending
-    filteredEvents.sort((a, b) => b.createdAt - a.createdAt);
-    
+    // `recent` is already newest-first from the desc take.
     // Apply limit if specified
     if (args.limit) {
       filteredEvents = filteredEvents.slice(0, args.limit);
