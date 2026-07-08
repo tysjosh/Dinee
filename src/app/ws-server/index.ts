@@ -185,6 +185,16 @@ function internalSecretArg(): { internalSecret?: string } {
   return key ? { internalSecret: key } : {};
 }
 
+/** Escape a string for safe inclusion as TwiML/XML text content. */
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 // Register the restaurant and logistics VoiceDomainPacks (and wire their tool
 // handlers into the runtime tool executor) at startup, so the pack-driven
 // session driver can resolve packs by conversation type (Req 3.1, 4.2). The
@@ -280,9 +290,22 @@ fastify.all("/incoming-call", async (request: any, reply) => {
   const toNumber = request.body?.To || request.query?.To || "";
   const route = await resolvePhoneToRoute(convexClient, toNumber);
 
+  // Spoken disclosure at answer time: (1) AI/bot disclosure and (2) recording
+  // notice. Covers US call-recording consent (incl. two-party-consent-state
+  // callers) and rising bot-disclosure expectations. Overridable per deployment
+  // via CALL_DISCLOSURE_TEXT; set to an empty string to omit (not recommended
+  // in the US). Read once so it can be disabled without a code change.
+  const disclosureText =
+    process.env.CALL_DISCLOSURE_TEXT ??
+    "You're speaking with an AI virtual assistant, and this call may be recorded for quality and order accuracy.";
+  const disclosureSay = disclosureText.trim().length
+    ? `<Say>${escapeXml(disclosureText)}</Say>`
+    : "";
+
   // Pass call context via query params to the WebSocket connection
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
     <Response>
+    ${disclosureSay}
     <Pause length="1"/>
     <Connect>
     <Stream url="wss://${request.headers.host}/media-stream?callSid=${encodeURIComponent(callSid || '')}&amp;from=${encodeURIComponent(fromNumber || '')}&amp;to=${encodeURIComponent(toNumber)}&amp;conversationType=${encodeURIComponent(route.conversationType)}&amp;tenantId=${encodeURIComponent(route.tenantId ?? "")}&amp;platformId=${encodeURIComponent(route.platformId ?? "")}" />

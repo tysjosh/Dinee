@@ -587,8 +587,19 @@ export const executeProvisioning = internalAction({
       );
     }
 
-    // Req 2.5 — configure voice webhook
-    const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.dinee.com"}/api/incoming-call`;
+    // Req 2.5 — configure voice webhook.
+    // The webhook MUST point at the ws-server voice runtime, which serves both
+    // the Twilio entry point (`/incoming-call`, returns TwiML) and the media
+    // stream (`/media-stream`, wss) on the SAME host — the TwiML builds the
+    // stream URL from its own request host. So this is the public URL of the
+    // deployed ws-server (e.g. https://voice.yourdomain.com), NOT the Next app
+    // URL, and the path is `/incoming-call` (no `/api` prefix).
+    const voiceBase = (
+      process.env.VOICE_WEBHOOK_BASE_URL ??
+      process.env.NEXT_PUBLIC_APP_URL ??
+      "https://voice.dinee.com"
+    ).replace(/\/$/, "");
+    const webhookUrl = `${voiceBase}/incoming-call`;
     await ctx.runAction(
       internal.phoneProvisioning.actions.configureWebhook,
       {
