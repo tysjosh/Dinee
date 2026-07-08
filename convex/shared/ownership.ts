@@ -200,6 +200,38 @@ export async function requireRoleOrInternal(
 }
 
 /**
+ * Resolve the branch restriction that applies to the CURRENT caller when
+ * reading tenant-wide lists (calls/orders).
+ *
+ * Returns `null` (no restriction — see everything for the tenant) when the call
+ * is a trusted server caller (valid internal secret), the caller is a platform
+ * admin or tenant owner, or the caller is a branch-scoped user with no
+ * `assignedBranchIds` set (backward compatible). Returns the caller's
+ * `assignedBranchIds` array when they are a branch-scoped user
+ * (branch_manager / supervisor) WITH a populated assignment — the caller then
+ * sees only rows whose `branchId` is in that set.
+ *
+ * Callers apply the restriction in memory to the already-tenant-scoped result
+ * set, so branch staff are limited to their branches without changing the
+ * owner/admin/internal behaviour or the query's index usage.
+ */
+export async function getCallerBranchRestriction(
+  ctx: AnyCtx,
+  internalSecret: string | undefined
+): Promise<string[] | null> {
+  if (hasValidInternalSecret(internalSecret)) return null;
+  const user = await getCurrentUserRecord(ctx);
+  if (!user || isPlatformAdmin(user)) return null;
+  const branchScoped =
+    user.role === "branch_manager" || user.role === "supervisor";
+  const assigned = user.assignedBranchIds;
+  if (branchScoped && Array.isArray(assigned) && assigned.length > 0) {
+    return assigned;
+  }
+  return null;
+}
+
+/**
  * Allow the call when it comes from a trusted server caller (valid internal
  * secret) OR from a session user who may act on the given BRANCH.
  *

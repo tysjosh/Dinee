@@ -5,6 +5,7 @@ import {
   requireTenantAccessOrInternal,
   requireBranchAccessOrInternal,
   requirePlatformAdmin,
+  getCallerBranchRestriction,
 } from "./shared/ownership";
 
 // Call/transcript data is tenant-scoped. These functions serve the dashboard
@@ -99,6 +100,13 @@ export const getCallsByRestaurant = query({
       .order("desc")
       .take(1000);
 
+    // Branch-scoped staff (branch_manager / supervisor with assigned branches)
+    // see only their branches' calls; owners/admins/internal see all.
+    const branchIds = await getCallerBranchRestriction(ctx, args.internalSecret);
+    if (branchIds) {
+      const allowed = new Set(branchIds);
+      return calls.filter((c) => c.branchId && allowed.has(c.branchId));
+    }
     return calls;
   },
 });

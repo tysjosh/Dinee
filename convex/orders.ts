@@ -6,7 +6,26 @@ import {
   requireTenantAccessOrInternal,
   requireBranchAccessOrInternal,
   requirePlatformAdmin,
+  getCallerBranchRestriction,
 } from "./shared/ownership";
+import type { Doc } from "./_generated/dataModel";
+
+/**
+ * Restrict a tenant-scoped order list to the caller's assigned branches when
+ * they are branch-scoped staff; owners/admins/internal callers see all. Applied
+ * in memory to the already-fetched, tenant-scoped result so the query's index
+ * usage is unchanged.
+ */
+async function restrictOrdersToCallerBranches(
+  ctx: QueryCtx,
+  orders: Doc<"orders">[],
+  internalSecret: string | undefined
+): Promise<Doc<"orders">[]> {
+  const branchIds = await getCallerBranchRestriction(ctx, internalSecret);
+  if (!branchIds) return orders;
+  const allowed = new Set(branchIds);
+  return orders.filter((o) => o.branchId && allowed.has(o.branchId));
+}
 
 // Orders are tenant-scoped. These functions serve the dashboard (session) and
 // server routes (payment webhooks, messaging, rider API, partner API — all of
@@ -197,7 +216,7 @@ export const getActiveOrdersByRestaurant = query({
       .order("desc")
       .take(1000);
 
-    return orders;
+    return restrictOrdersToCallerBranches(ctx, orders, args.internalSecret);
   },
 });
 
@@ -232,7 +251,7 @@ export const getPastOrdersByRestaurant = query({
       .order("desc")
       .take(1000);
 
-    return orders;
+    return restrictOrdersToCallerBranches(ctx, orders, args.internalSecret);
   },
 });
 

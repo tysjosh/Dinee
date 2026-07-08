@@ -25,8 +25,21 @@ const TeamInvitations: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   const tenantId = state.restaurant?.restaurantId ?? "";
+
+  const buildInviteLink = (token: string) =>
+    `${typeof window !== "undefined" ? window.location.origin : ""}/client/signup?invite=${token}`;
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const invitations = useQuery(
     api.invitations.getInvitationsByTenant,
@@ -64,14 +77,19 @@ const TeamInvitations: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      await createInvitation({
+      const result = await createInvitation({
         email: trimmedEmail,
         role,
         tenantId,
       });
+      const link = buildInviteLink(result.inviteToken);
+      setInviteLink(link);
+      const copied = await copyToClipboard(link);
       setEmail("");
       setRole("supervisor");
-      setSuccessMessage(`Invitation sent to ${trimmedEmail}`);
+      setSuccessMessage(
+        `Invite link created for ${trimmedEmail}${copied ? " and copied to clipboard" : ""}.`
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to send invitation.";
       setError(message);
@@ -92,13 +110,21 @@ const TeamInvitations: React.FC = () => {
     }
   };
 
-  const handleResend = async (invitationId: Id<"invitations">) => {
+  const handleCopyLink = async (invitationId: Id<"invitations">) => {
     setActionLoading(invitationId);
     try {
-      await resendInvitation({ invitationId });
-      setSuccessMessage("Invitation resent successfully.");
+      // resendInvitation rotates the token and returns the fresh raw value (only
+      // its hash is stored), so this is the only way to obtain a usable link
+      // after creation. Any previously shared link for this invite is invalidated.
+      const result = await resendInvitation({ invitationId });
+      const link = buildInviteLink(result.inviteToken);
+      setInviteLink(link);
+      const copied = await copyToClipboard(link);
+      setSuccessMessage(
+        copied ? "Invite link copied to clipboard." : "Invite link refreshed."
+      );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to resend invitation.";
+      const message = err instanceof Error ? err.message : "Failed to refresh invite link.";
       setError(message);
     } finally {
       setActionLoading(null);
@@ -218,6 +244,30 @@ const TeamInvitations: React.FC = () => {
               <p className="text-sm text-emerald-400">{successMessage}</p>
             </div>
           )}
+
+          {inviteLink && (
+            <div className="p-3 rounded-lg bg-white/5 border border-white/10 space-y-2">
+              <p className="text-xs text-white/60">
+                Share this invite link (valid 7 days). No email is sent — send it
+                to the person yourself.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={inviteLink}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 px-3 py-2 bg-black/40 border border-white/15 rounded-lg text-white/80 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(inviteLink)}
+                  className="px-3 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors duration-200 cursor-pointer flex-shrink-0"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
         </form>
 
         {/* Invitations List */}
@@ -292,11 +342,11 @@ const TeamInvitations: React.FC = () => {
                             {isPending && (
                               <div className="flex items-center justify-end gap-2">
                                 <button
-                                  onClick={() => handleResend(inv._id)}
+                                  onClick={() => handleCopyLink(inv._id)}
                                   disabled={isActionLoading}
                                   className="px-2.5 py-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-md transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                                 >
-                                  Resend
+                                  Copy link
                                 </button>
                                 <button
                                   onClick={() => handleRevoke(inv._id)}
