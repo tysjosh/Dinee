@@ -809,12 +809,12 @@ export function AgentPerformance({
             )}
             
             <FilterDropdown
-              label="Restaurant"
+              label="Business"
               value={filters.restaurantId}
               options={filteredRestaurants}
               onChange={(v) => handleFilterChange('restaurantId', v)}
               icon={Store}
-              placeholder="All Restaurants"
+              placeholder="All Businesses"
             />
             
             <FilterDropdown
