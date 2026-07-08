@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Restaurant } from "@/types/global";
 import { BranchData } from "@/components/onboarding/BranchSetup";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const RESTAURANT_ID_KEY = "restaurantId";
 
@@ -29,6 +30,7 @@ interface RestaurantDataWithBranches extends Omit<Restaurant, 'id'> {
 export function useRestaurantStorage() {
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { user } = useCurrentUser();
   const restaurantData = useQuery(
     api.restaurants.getRestaurant,
     restaurantId ? { restaurantId } : "skip"
@@ -187,9 +189,21 @@ export function useRestaurantStorage() {
   }, [restaurantId, deleteRestaurantData, clearRestaurantId]);
 
   useEffect(() => {
-    const id = getRestaurantId();
+    const stored = getRestaurantId();
+    // Returning users have no onboarding-written localStorage id, so fall back
+    // to the authenticated user's tenantId (the tenant they belong to) and
+    // persist it. Only tenant-bound accounts (restaurant/business) map to a
+    // business record; platform admins do not.
+    if (
+      !stored &&
+      user &&
+      user.tenantId &&
+      (user.tenantType === "restaurant" || user.tenantType === "business")
+    ) {
+      saveRestaurantId(user.tenantId);
+    }
     setLoading(false);
-  }, [getRestaurantId]);
+  }, [getRestaurantId, saveRestaurantId, user]);
 
   // Convert Convex data to Restaurant type
   const convertedRestaurantData: Restaurant | null = restaurantData && menuItems ? {
