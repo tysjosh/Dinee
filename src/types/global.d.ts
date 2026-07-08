@@ -32,8 +32,8 @@ export interface Restaurant {
 }
 
 // Multi-tenant types
-export type UserRole = 'platform_admin' | 'restaurant_owner' | 'branch_manager' | 'supervisor';
-export type TenantType = 'platform' | 'restaurant' | 'branch';
+export type UserRole = 'platform_admin' | 'restaurant_owner' | 'business_owner' | 'branch_manager' | 'supervisor';
+export type TenantType = 'platform' | 'restaurant' | 'business' | 'branch';
 
 export type Call  = Doc<"calls">
 

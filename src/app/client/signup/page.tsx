@@ -103,9 +103,12 @@ export default function SignUpPage() {
       // picked a vertical yet, so we use the neutral "business" default, which
       // onboarding corrects (restaurant/business/...) via setCurrentUserTenant.
       const isInvited = invitation?.status === "pending";
+      // A restaurant is just one kind of business — new tenant owners are
+      // provisioned with the generic business_owner role regardless of vertical
+      // (the vertical is captured separately on the tenant during onboarding).
       const role = isInvited && invitation?.role
         ? invitation.role
-        : "restaurant_owner";
+        : "business_owner";
       const tenantId = isInvited && invitation?.tenantId
         ? invitation.tenantId
         : "";
@@ -121,7 +124,11 @@ export default function SignUpPage() {
       // record and there are never duplicate users for one email.
       await upsertCurrentUserProfile({
         email,
-        role: role as "restaurant_owner" | "branch_manager" | "supervisor",
+        role: role as
+          | "business_owner"
+          | "restaurant_owner"
+          | "branch_manager"
+          | "supervisor",
         tenantType,
         tenantId,
       });

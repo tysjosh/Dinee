@@ -23,7 +23,7 @@ import { Doc } from "../../convex/_generated/dataModel";
  * - branch_manager: Access to their assigned branch only
  * - supervisor: Read-only access to orders and calls within their branch
  */
-export type UserRole = 'platform_admin' | 'restaurant_owner' | 'branch_manager' | 'supervisor';
+export type UserRole = 'platform_admin' | 'restaurant_owner' | 'business_owner' | 'branch_manager' | 'supervisor';
 
 /**
  * Resource action types for permission checking
@@ -127,6 +127,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { resource: 'call', actions: ['read'] },
     { resource: 'analytics', actions: ['read'] }
   ],
+  // A restaurant is just one kind of business — business_owner is the generic
+  // tenant owner and shares the owner permission set. restaurant_owner is kept
+  // for existing accounts; new owners are provisioned as business_owner.
+  business_owner: [
+    { resource: 'restaurant', actions: ['read', 'update'] },
+    { resource: 'branch', actions: ['create', 'read', 'update', 'delete'] },
+    { resource: 'menu', actions: ['create', 'read', 'update', 'delete'] },
+    { resource: 'order', actions: ['read', 'update'] },
+    { resource: 'call', actions: ['read'] },
+    { resource: 'analytics', actions: ['read'] }
+  ],
   branch_manager: [
     { resource: 'branch', actions: ['read', 'update'] },
     { resource: 'menu', actions: ['read', 'update'] },
@@ -185,7 +196,10 @@ function tenantReducer(state: TenantState, action: TenantAction): TenantState {
       return {
         ...state,
         userRole: action.payload,
-        permissions: ROLE_PERMISSIONS[action.payload],
+        // Fall back to the most restrictive permission set for any role not in
+        // the matrix, so an unmapped role can never yield undefined permissions
+        // (which would crash hasPermission).
+        permissions: ROLE_PERMISSIONS[action.payload] ?? ROLE_PERMISSIONS.supervisor,
       };
 
     case 'SET_TENANT_SCOPE':
@@ -249,7 +263,7 @@ export function TenantProvider({
   const [state, dispatch] = useReducer(tenantReducer, {
     ...initialState,
     userRole: initialRole,
-    permissions: ROLE_PERMISSIONS[initialRole],
+    permissions: ROLE_PERMISSIONS[initialRole] ?? ROLE_PERMISSIONS.supervisor,
   });
 
   // Fetch platform data if platformId is provided
@@ -391,8 +405,13 @@ export function TenantProvider({
       };
     }
 
-    // Restaurant owner has access to their restaurant and all branches
-    if (effectiveRole === 'restaurant_owner' && platform && restaurant) {
+    // A tenant owner (restaurant or generic business) has access to their whole
+    // tenant and all branches.
+    if (
+      (effectiveRole === 'restaurant_owner' || effectiveRole === 'business_owner') &&
+      platform &&
+      restaurant
+    ) {
       return {
         platformId: platform.platformId,
         restaurantId: restaurant.restaurantId,
@@ -444,8 +463,9 @@ export function TenantProvider({
       return { platformId: tenantScope.platformId };
     }
 
-    // Restaurant owner can see all data within their restaurant
-    if (userRole === 'restaurant_owner') {
+    // A tenant owner (restaurant or generic business) sees all data within
+    // their tenant.
+    if (userRole === 'restaurant_owner' || userRole === 'business_owner') {
       return {
         platformId: tenantScope.platformId,
         restaurantId: tenantScope.restaurantId,
@@ -529,7 +549,7 @@ export function roleHasPermission(
   resource: string,
   action: ResourceAction
 ): boolean {
-  const permissions = ROLE_PERMISSIONS[role];
+  const permissions = ROLE_PERMISSIONS[role] ?? ROLE_PERMISSIONS.supervisor;
   return permissions.some(permission => {
     if (permission.resource === '*') {
       return permission.actions.includes(action);
@@ -541,12 +561,16 @@ export function roleHasPermission(
 /**
  * Get the tenant type for a role
  */
-export function getTenantTypeForRole(role: UserRole): 'platform' | 'restaurant' | 'branch' {
+export function getTenantTypeForRole(
+  role: UserRole
+): 'platform' | 'restaurant' | 'business' | 'branch' {
   switch (role) {
     case 'platform_admin':
       return 'platform';
     case 'restaurant_owner':
       return 'restaurant';
+    case 'business_owner':
+      return 'business';
     case 'branch_manager':
     case 'supervisor':
       return 'branch';
