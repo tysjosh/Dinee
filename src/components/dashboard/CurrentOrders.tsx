@@ -9,6 +9,7 @@ import WhatsAppOptInModal from "./WhatsAppOptInModal";
 import DeliveryStatusModal from "./DeliveryStatusModal";
 import { useOrders } from "@/contexts";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useMutation, useConvex } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import {
@@ -40,6 +41,11 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
     state: { activeOrders: currentOrders, loading, error },
     actions,
   } = useOrders();
+  const { user } = useCurrentUser();
+  // Supervisors are read-only: they monitor orders but cannot edit status,
+  // delivery, notifications, or cancel/complete. Owners / branch managers /
+  // platform admins can. Matches the backend requireEditorOrInternal gate.
+  const canEdit = user?.role !== "supervisor";
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
   const [cancellationModalOpen, setCancellationModalOpen] = useState(false);
@@ -679,6 +685,7 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       <span>Call Customer</span>
                     </button>
                     {/* Delivery Status Button */}
+                    {canEdit && (
                     <button
                       className="bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
                       onClick={() => handleDeliveryStatus(order)}
@@ -690,8 +697,9 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                           : "Manage Delivery"}
                       </span>
                     </button>
+                    )}
                     {/* WhatsApp Opt-In Button - Requirement 13.2: Prompt for opt-in on first order */}
-                    {ordersNeedingOptIn.has(order.id) && order.whatsappOptIn === undefined && (
+                    {canEdit && ordersNeedingOptIn.has(order.id) && order.whatsappOptIn === undefined && (
                       <button
                         className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
                         onClick={() => handleWhatsAppOptIn(order)}
@@ -721,6 +729,7 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                         )}
                       </div>
                     )}
+                    {canEdit && (
                     <button
                       className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:border-red-500/30 px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer"
                       onClick={() => handleCancelOrder(order)}
@@ -728,6 +737,8 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                       <XCircle className="w-3.5 h-3.5" />
                       <span>Cancel Order</span>
                     </button>
+                    )}
+                    {canEdit && (
                     <button
                       className={cn(
                         "px-3 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-medium transition-all duration-200 cursor-pointer",
@@ -749,6 +760,7 @@ const CurrentOrders: React.FC<CurrentOrdersProps> = ({ className }) => {
                         </>
                       )}
                     </button>
+                    )}
                   </div>
                 </div>
               </div>

@@ -35,6 +35,17 @@ export type AppRole =
 export const TENANT_OWNER_ROLES: AppRole[] = ["restaurant_owner", "business_owner"];
 
 /**
+ * Roles allowed to EDIT operational data within a tenant (order status,
+ * cancellations, deliveries, menu availability): the owners plus the
+ * branch_manager. Supervisors are read-only and are intentionally excluded.
+ */
+export const TENANT_EDITOR_ROLES: AppRole[] = [
+  "restaurant_owner",
+  "business_owner",
+  "branch_manager",
+];
+
+/**
  * Resolve the authenticated user's app record (with role/tenantId), or null
  * when the request carries no valid identity.
  */
@@ -177,6 +188,23 @@ export async function requireTenantAccessOrInternal(
 ): Promise<void> {
   if (hasValidInternalSecret(internalSecret)) return;
   await requireTenantAccess(ctx, restaurantId);
+}
+
+/**
+ * Allow the call when it comes from a trusted server caller (valid internal
+ * secret) OR from a session user who may EDIT operational data for the tenant
+ * (owners / branch_manager / platform admin). Supervisors — who have tenant
+ * read access for day-to-day monitoring — are rejected. Server-to-server
+ * callers (voice runtime, messaging, rider) forwarding the internal secret are
+ * unrestricted.
+ */
+export async function requireEditorOrInternal(
+  ctx: AnyCtx,
+  restaurantId: string,
+  internalSecret: string | undefined
+): Promise<void> {
+  if (hasValidInternalSecret(internalSecret)) return;
+  await requireRole(ctx, restaurantId, TENANT_EDITOR_ROLES);
 }
 
 /**

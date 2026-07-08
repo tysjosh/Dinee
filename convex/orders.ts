@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import {
   requireTenantAccessOrInternal,
   requireBranchAccessOrInternal,
+  requireEditorOrInternal,
   requirePlatformAdmin,
   getCallerBranchRestriction,
 } from "./shared/ownership";
@@ -393,7 +394,7 @@ export const updateOrder = mutation({
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    await requireTenantAccessOrInternal(ctx, currentOrder.restaurantId, internalSecret);
+    await requireEditorOrInternal(ctx, currentOrder.restaurantId, internalSecret);
 
     // Define proper type for order updates
     type OrderUpdate = {
@@ -495,7 +496,7 @@ export const deleteOrder = mutation({
   args: { orderId: v.id("orders"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.orderId);
-    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
+    await requireEditorOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
     await ctx.db.delete(args.orderId);
     return args.orderId;
   },
@@ -506,7 +507,7 @@ export const completeOrder = mutation({
   args: { orderId: v.id("orders"), internalSecret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.orderId);
-    await requireTenantAccessOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
+    await requireEditorOrInternal(ctx, existing?.restaurantId ?? "", args.internalSecret);
     await ctx.db.patch(args.orderId, {
       status: "completed",
     });
@@ -531,7 +532,7 @@ export const cancelOrder = mutation({
       throw new Error(`Order not found: ${args.orderId}`);
     }
 
-    await requireTenantAccessOrInternal(ctx, currentOrder.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, currentOrder.restaurantId, args.internalSecret);
 
     await ctx.db.patch(args.orderId, {
       status: "cancelled",
@@ -590,7 +591,7 @@ export const createOrderWithPayment = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Determine initial payment status based on payment method
     // COD orders start with "pending" status as per requirement 10.1
     const paymentStatus = "pending";
@@ -671,7 +672,7 @@ export const recordCODPaymentCollection = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -710,7 +711,7 @@ export const recordCODPaymentFailure = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -835,7 +836,7 @@ export const updateOrderStatus = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
@@ -932,7 +933,7 @@ export const updateDeliveryStatus = mutation({
     internalSecret: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireTenantAccessOrInternal(ctx, args.restaurantId, args.internalSecret);
+    await requireEditorOrInternal(ctx, args.restaurantId, args.internalSecret);
     // Find the order by orderId using index
     const order = await ctx.db
       .query("orders")
