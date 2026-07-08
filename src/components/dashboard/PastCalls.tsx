@@ -9,7 +9,6 @@ import {
   CheckCircle,
   XCircle,
   Utensils,
-  ChefHat,
   PhoneCall,
   MessageSquare,
   History,
@@ -118,9 +117,9 @@ const PastCalls: React.FC = () => {
             improve service.
           </p>
           <div className="inline-flex items-center space-x-3 bg-emerald-500/10 px-6 py-3 rounded-lg border border-emerald-500/20">
-            <ChefHat className="w-5 h-5 text-emerald-400" />
+            <PhoneCall className="w-5 h-5 text-emerald-400" />
             <span className="text-sm font-medium text-emerald-400">
-              Ready to serve customers
+              Ready for incoming calls
             </span>
           </div>
         </div>

@@ -8,7 +8,6 @@ import {
   Clock,
   MapPin,
   Utensils,
-  ChefHat,
   PhoneCall,
   MessageSquare,
   Activity,
@@ -100,14 +99,14 @@ const CurrentCalls: React.FC = () => {
       <div className="bg-black border border-white/10 rounded-xl p-12">
         <div className="text-center">
           <div className="w-20 h-20 mx-auto mb-6 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
-            <ChefHat className="w-10 h-10 text-white/60" />
+            <PhoneCall className="w-10 h-10 text-white/60" />
           </div>
           <h3 className="text-base font-semibold text-white mb-2">
-            Ready to Serve Customers
+            Ready for Incoming Calls
           </h3>
           <p className="text-white/70 max-w-md mx-auto mb-6 leading-relaxed text-sm">
-            Your AI assistant is standing by to take orders, answer questions,
-            and help customers. Active calls will appear here in real-time.
+            Your AI assistant is standing by to answer calls and help your
+            customers. Active calls will appear here in real-time.
           </p>
           <div className="inline-flex items-center space-x-3 bg-emerald-500/10 px-6 py-3 rounded-lg border border-emerald-500/20">
             <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
