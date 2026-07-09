@@ -50,6 +50,7 @@ import { resolvePhoneToRoute, type ConversationType } from "../../lib/call-routi
 import { registerRestaurantVoicePack } from "../../lib/modules/packs/restaurant/index.ts";
 import { registerLogisticsVoicePack } from "../../lib/modules/packs/logistics/index.ts";
 import { registerRunsheetVoicePack } from "../../lib/modules/packs/runsheet/index.ts";
+import { registerCampusVoicePack } from "../../lib/modules/packs/campus/index.ts";
 import {
   registerRunsheetPlatform,
   RUNSHEET_DRIVER_EXCEPTION_CONVERSATION_TYPE,
@@ -217,6 +218,20 @@ if (!runsheetPackRegistration.ok) {
   logger.error("Failed to register runsheet voice pack", {
     code: runsheetPackRegistration.error.code,
     detail: runsheetPackRegistration.error.detail,
+  });
+}
+
+// Register the Campus VoiceDomainPack in `extend` mode — additive registration
+// into the shared registry (no moduleBridge, mirroring the restaurant pack), so
+// the session driver can resolve the `campus_agent_conversation` type. Per-call
+// config (voice/personality/knowledge/boundaries/creator-contact) and the
+// call-end `campusAgentId`/duration write are handled by the Convex campus
+// session service the runtime consumes at call time (Req 5.4, 8.1, 8.4, 8.8).
+const campusPackRegistration = registerCampusVoicePack();
+if (!campusPackRegistration.ok) {
+  logger.error("Failed to register campus voice pack", {
+    code: campusPackRegistration.error.code,
+    detail: campusPackRegistration.error.detail,
   });
 }
 

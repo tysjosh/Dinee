@@ -70,8 +70,20 @@ export default defineSchema({
       v.literal("supervisor"),
       // NEW — additive member for Control Plane partner self-service
       // (platform-control-plane Req 5.2, 4.5, 5.6). Existing rows validate as-is.
-      v.literal("partner")
+      v.literal("partner"),
+      // NEW — Dinee Campus Student_Creator role (dinee-campus Req 2.3, 4.2).
+      // Additive; existing rows validate unchanged.
+      v.literal("student_creator")
     )),
+    // NEW — Dinee Campus: optional display name for Campus creator identity
+    // (dinee-campus Req 2.3, 6.1).
+    campusDisplayName: v.optional(v.string()),
+    // NEW — Dinee Campus: optional handle used to address a Creator_Page route
+    // (dinee-campus Req 15.15).
+    campusHandle: v.optional(v.string()),
+    // NEW — Dinee Campus: Creator_Page visibility setting; absent is treated as
+    // "hidden" (dinee-campus Req 15.16, 15.17).
+    creatorPageVisibility: v.optional(v.union(v.literal("public"), v.literal("hidden"))),
     // NEW — optional explicit Authorization_Scope override for a partner
     // (platform-control-plane Req 5.2). When absent, a partner's scope is
     // derived from tenantId. Optional so existing users validate unchanged.
@@ -94,7 +106,10 @@ export default defineSchema({
     .index("phone", ["phone"])
     // Custom app indexes
     .index("by_user_id", ["userId"])
-    .index("by_tenant", ["tenantType", "tenantId"]),
+    .index("by_tenant", ["tenantType", "tenantId"])
+    // NEW — Dinee Campus: resolve a Creator_Page by its handle (dinee-campus
+    // Req 15.15). Additive index; existing rows without a handle are unaffected.
+    .index("by_campus_handle", ["campusHandle"]),
 
   // Branches (physical locations of restaurants)
   branches: defineTable({
@@ -219,6 +234,11 @@ export default defineSchema({
     source_platform: v.optional(v.string()),
     source_tenant: v.optional(v.string()),
     external_reference_id: v.optional(v.string()),
+    // NEW — Dinee Campus: correlate a call to a Campus agent (dinee-campus Req 8.8, 9.1).
+    campusAgentId: v.optional(v.string()),
+    // NEW — Dinee Campus: snapshot of the recording privacy setting at call start
+    // (dinee-campus Req 12.5, 12.8).
+    recordingEnabled: v.optional(v.boolean()),
   })
     .index("by_restaurant_id", ["restaurantId"])
     .index("by_branch_id", ["branchId"])
@@ -1196,7 +1216,8 @@ export default defineSchema({
     countryCode: v.string(),
     createdAt: v.number(),
     // Assignment fields (optional)
-    assignedToType: v.optional(v.union(v.literal("branch"), v.literal("location"))),
+    // NEW — Dinee Campus: allow assignment to a campus agent (dinee-campus Req 4.2).
+    assignedToType: v.optional(v.union(v.literal("branch"), v.literal("location"), v.literal("campus_agent"))),
     assignedToId: v.optional(v.string()),
     assignedAt: v.optional(v.number()),
     releasedAt: v.optional(v.number()),
@@ -1515,4 +1536,260 @@ export default defineSchema({
     .index("by_tenant_id", ["tenantId"])
     .index("by_type", ["alertType"])
     .index("by_created_at", ["createdAt"]),
+
+  // ==========================================================================
+  // Dinee Campus tables (dinee-campus spec). All new tables; existing tables
+  // above are extended only additively to preserve backward compatibility.
+  // ==========================================================================
+
+  // Campus_Agent — a Student_Creator's published/draft AI voice agent.
+  // Requirements: 2.3, 4.2, 4.3, 6.1, 6.5, 7.1, 7.2, 7.9, 10.2, 11.4, 11.12,
+  //   12.5, 15.5, 15.6, 15.7
+  campusAgents: defineTable({
+    agentId: v.string(),          // stable public id
+    slug: v.string(),             // unique call-link slug (Req 7.1)
+    ownerId: v.string(),          // users._id / userId of the Student_Creator
+    name: v.string(),             // 1–50 chars (Req 4.7)
+    agentType: v.union(
+      v.literal("ai_twin"), v.literal("study_agent"), v.literal("club_agent"),
+      v.literal("campus_guide"), v.literal("funny_character"),
+      v.literal("tutor_agent"), v.literal("advice_agent")
+    ),
+    campusTag: v.optional(v.string()),      // required to publish (Req 10.2)
+    voiceId: v.string(),
+    personalityTone: v.string(),
+    description: v.string(),                 // ≤280 (Req 6.1)
+    creatorDisplayName: v.string(),          // 1–50
+    previewPrompts: v.array(v.string()),     // 3–5 (Req 3.2, 6.4)
+    visibility: v.union(v.literal("public"), v.literal("private")),
+    status: v.union(             // Publish_State (Req 4.2, 7.2, 7.9)
+      v.literal("draft"),
+      v.literal("publish_pending_link"), // registered with runtime, awaiting Call_Link (Req 4.2)
+      v.literal("published"),
+      v.literal("link_failed"),  // Call_Link generation failed, retryable (Req 7.2)
+      v.literal("removed"),      // removed from public listing (Req 11.4)
+      v.literal("blocked"),      // blocked by operator (Req 11.3)
+      v.literal("deleted")
+    ),
+    representsRealPerson: v.boolean(),       // gates consent (Req 11.12)
+    remixEnabled: v.optional(v.boolean()),   // (Req 6.5, 15.5, 15.8)
+    remixSourceAgentId: v.optional(v.string()), // set on remixed agents → source attribution (Req 15.6)
+    remixCount: v.optional(v.number()),      // number of successful remixes of this agent (Req 15.7, 9.1)
+    recordingEnabled: v.optional(v.boolean()),   // (Req 12.5)
+    summariesEnabled: v.optional(v.boolean()),   // (Req 12.6)
+    creatorContactLink: v.optional(v.string()),  // (Req 8.6)
+    monetizationLink: v.optional(v.string()),    // (Req 9.5)
+    optional: v.optional(v.object({              // (Req 2.4)
+      socialLink: v.optional(v.string()),
+      clubName: v.optional(v.string()),
+      courseCode: v.optional(v.string()),
+      eventDate: v.optional(v.number()),
+      contactEmail: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),                   // draft retention (Req 4.3)
+    publishedAt: v.optional(v.number()),     // trending/new (Req 10.4)
+  })
+    .index("by_agent_id", ["agentId"])
+    .index("by_slug", ["slug"])
+    .index("by_owner", ["ownerId"])
+    .index("by_status_visibility", ["status", "visibility"])
+    .index("by_campus_tag", ["campusTag"])
+    .index("by_type", ["agentType"])
+    .index("by_published_at", ["publishedAt"]),
+
+  // Private_Link tokens for private Campus_Agents. Modeled as a table so tokens
+  // can be rotated and revoked independently while preserving an audit trail.
+  // Requirements: 6.10, 6.11, 6.12
+  campusPrivateLinks: defineTable({
+    linkId: v.string(),
+    agentId: v.string(),          // owning campusAgent
+    token: v.string(),            // unguessable, high-entropy Private_Link token (Req 6.10)
+    status: v.union(v.literal("active"), v.literal("revoked")), // rotation/revocation (Req 6.12)
+    createdAt: v.number(),
+    revokedAt: v.optional(v.number()),
+  })
+    .index("by_token", ["token"])
+    .index("by_agent_id", ["agentId"])
+    .index("by_agent_and_status", ["agentId", "status"]),
+
+  // Knowledge_Store sources grounding a Campus_Agent.
+  // Requirements: 5.1, 5.2, 5.6, 11.7, 11.8, 13.1
+  campusKnowledgeSources: defineTable({
+    sourceId: v.string(),
+    agentId: v.string(),
+    kind: v.union(
+      v.literal("instructions"), v.literal("faq"), v.literal("document"),
+      v.literal("link"), v.literal("event"), v.literal("club"), v.literal("course")
+    ),
+    textContent: v.optional(v.string()),      // instructions ≤10k (Req 5.1)
+    faqEntries: v.optional(v.array(v.object({ // ≤500 entries, answer ≤2000 (Req 5.1)
+      question: v.string(), answer: v.string(),
+    }))),
+    storageId: v.optional(v.string()),        // Convex file storage id for documents
+    fileMeta: v.optional(v.object({ fileName: v.string(), sizeBytes: v.number(), mimeType: v.string() })),
+    moderationStatus: v.union(v.literal("pending"), v.literal("approved"), v.literal("flagged")), // (Req 11.7, 11.8)
+    createdAt: v.number(),
+  })
+    .index("by_source_id", ["sourceId"])
+    .index("by_agent_id", ["agentId"]),
+
+  // Template_Library — one template per Agent_Type.
+  // Requirements: 3.1, 3.2, 3.3
+  campusTemplates: defineTable({
+    templateId: v.string(),
+    agentType: v.union(                       // same seven literals as campusAgents.agentType, incl. advice_agent (Req 3.1)
+      v.literal("ai_twin"), v.literal("study_agent"), v.literal("club_agent"),
+      v.literal("campus_guide"), v.literal("funny_character"),
+      v.literal("tutor_agent"), v.literal("advice_agent")
+    ),
+    personalityTone: v.string(),
+    previewPrompts: v.array(v.string()),      // ≥3 (Req 3.2)
+    knowledgeGuidance: v.array(v.string()),   // ≥1 (Req 3.2)
+    presetFields: v.object({                  // prefill values (Req 3.3)
+      defaultDescription: v.optional(v.string()),
+      defaultVoiceId: v.optional(v.string()),
+    }),
+  })
+    .index("by_template_id", ["templateId"])
+    .index("by_agent_type", ["agentType"]),
+
+  // Per-call ratings for a Campus_Agent.
+  // Requirements: 8.10, 8.11
+  campusRatings: defineTable({
+    agentId: v.string(),
+    callId: v.string(),        // links to calls (Req 8.10)
+    rating: v.number(),        // integer 1–5 (Req 8.10, 8.11)
+    createdAt: v.number(),
+  })
+    .index("by_agent_id", ["agentId"])
+    .index("by_call_id", ["callId"]),
+
+  // Abuse/safety reports against a Campus_Agent.
+  // Requirements: 11.1, 11.2
+  campusReports: defineTable({
+    reportId: v.string(),
+    agentId: v.string(),       // required (Req 11.1, 11.2)
+    reason: v.string(),        // 1–1000 chars (Req 11.1, 11.2)
+    callId: v.optional(v.string()),
+    createdAt: v.number(),     // timestamp (Req 11.1)
+    status: v.union(v.literal("open"), v.literal("reviewed"), v.literal("actioned")),
+  })
+    .index("by_report_id", ["reportId"])
+    .index("by_agent_id", ["agentId"]),
+
+  // Safety escalation ledger — records that a configured escalation behavior
+  // (e.g. self-harm) was triggered during a voice conversation, with a
+  // timestamp. Kept separate from analytics `campusEvents` so escalations are
+  // not mixed into engagement metrics.
+  // Requirements: 11.10
+  campusSafetyEscalations: defineTable({
+    escalationId: v.string(),
+    agentId: v.string(),
+    callId: v.optional(v.string()),
+    kind: v.union(v.literal("self_harm")),   // extensible escalation classification (Req 11.10)
+    behavior: v.string(),                    // the configured escalation behavior that was triggered
+    triggeredAt: v.number(),                 // timestamp the escalation was triggered (Req 11.10)
+  })
+    .index("by_escalation_id", ["escalationId"])
+    .index("by_agent_id", ["agentId"])
+    .index("by_call_id", ["callId"]),
+
+  // Raw interaction log for analytics aggregation.
+  // Requirements: 9.1, 9.2, 9.3, 9.4
+  campusEvents: defineTable({
+    agentId: v.string(),
+    type: v.union(
+      v.literal("call_completed"), v.literal("share"), v.literal("save"), v.literal("remix"),
+      v.literal("question"), v.literal("event_interest"), v.literal("join_intent"),
+      v.literal("contact_click"), v.literal("conversion_click"), v.literal("quiz_completed"),
+      v.literal("confusing_topic"), v.literal("explanation_request")
+    ),
+    callId: v.optional(v.string()),
+    callerKey: v.optional(v.string()),   // hashed caller identity for unique-caller count (Req 9.1)
+    questionText: v.optional(v.string()),// top-questions aggregation (Req 9.2)
+    durationSeconds: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_agent_id", ["agentId"])
+    .index("by_agent_and_time", ["agentId", "createdAt"])
+    .index("by_agent_type_time", ["agentId", "type", "createdAt"]),
+
+  // Pre-aggregated daily analytics rollup.
+  // Requirements: 9.1, 9.2, 9.3, 9.4, 9.8
+  campusAnalyticsDaily: defineTable({
+    agentId: v.string(),
+    day: v.string(),           // YYYY-MM-DD (UTC)
+    callCount: v.number(),
+    uniqueCallerCount: v.number(),
+    shareCount: v.number(),
+    saveRemixCount: v.number(),
+    totalDurationSeconds: v.number(),
+    ratingSum: v.number(),
+    ratingCount: v.number(),
+    topQuestions: v.array(v.object({ text: v.string(), count: v.number() })),
+    typeMetrics: v.optional(v.object({          // type-specific (Req 9.3, 9.4)
+      confusingTopics: v.optional(v.array(v.object({ text: v.string(), count: v.number() }))),
+      requestedExplanations: v.optional(v.array(v.object({ text: v.string(), count: v.number() }))),
+      quizCompletions: v.optional(v.number()),
+      eventInterest: v.optional(v.number()),
+      joinIntent: v.optional(v.number()),
+      contactClicks: v.optional(v.number()),
+      conversionClicks: v.optional(v.number()),
+    })),
+  })
+    .index("by_agent_and_day", ["agentId", "day"]),
+
+  // Voice-clone consent records gating publish of real-person agents.
+  // Requirements: 11.11, 11.12
+  campusVoiceCloneConsents: defineTable({
+    consentId: v.string(),
+    agentId: v.string(),
+    ownerId: v.string(),
+    method: v.union(v.literal("recorded_phrase"), v.literal("account_ownership")), // (Req 11.11)
+    verified: v.boolean(),
+    storageId: v.optional(v.string()),   // recorded phrase artifact
+    createdAt: v.number(),
+  })
+    .index("by_agent_id", ["agentId"]),
+
+  // Monthly usage meter for tier-limit enforcement.
+  // Requirements: 13.1, 13.2, 13.3
+  campusUsage: defineTable({
+    ownerId: v.string(),
+    period: v.string(),                // YYYY-MM (calendar month, Req 13.1)
+    callMinutesUsed: v.number(),
+    documentUploadsUsed: v.number(),
+    agentCount: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_and_period", ["ownerId", "period"]),
+
+  // Distinct-saver ledger — authoritative source for a Campus_Agent's save
+  // count. Uniqueness is enforced on the (agentId, callerKey) pair.
+  // Requirements: 15.1, 15.2, 15.3
+  campusSaves: defineTable({
+    agentId: v.string(),
+    callerKey: v.string(),        // hashed caller identity (matches campusEvents.callerKey)
+    createdAt: v.number(),
+  })
+    .index("by_agent_id", ["agentId"])
+    .index("by_caller", ["callerKey"])
+    .index("by_agent_and_caller", ["agentId", "callerKey"]), // uniqueness enforced on this pair
+
+  // Call_Clip artifacts — shareable excerpts of recorded voice conversations.
+  // Rows created only when the source call was recorded and the Caller
+  // acknowledged the recording notice.
+  // Requirements: 15.12
+  campusCallClips: defineTable({
+    clipId: v.string(),
+    agentId: v.string(),          // attribution to the Campus_Agent (Req 15.12)
+    callId: v.string(),           // source completed call
+    storageId: v.string(),        // Convex file storage id for the audio/video excerpt
+    label: v.string(),            // always the visible "AI voice agent" label (Req 15.12)
+    createdAt: v.number(),
+  })
+    .index("by_clip_id", ["clipId"])
+    .index("by_agent_id", ["agentId"])
+    .index("by_call_id", ["callId"]),
 });

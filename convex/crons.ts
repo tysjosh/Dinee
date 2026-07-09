@@ -40,6 +40,22 @@ crons.daily(
 );
 
 /**
+ * Roll the previous UTC day's raw Campus interaction events into pre-aggregated
+ * per-agent daily analytics rows (`campusEvents` → `campusAnalyticsDaily`).
+ * Runs after midnight UTC so the just-completed day is fully closed; the
+ * Analytics_Dashboard then serves month-long periods from these daily rows plus
+ * the current day's live events.
+ *
+ * Requirements: 9.8
+ */
+crons.daily(
+  "rollup campus daily analytics",
+  { hourUTC: 0, minuteUTC: 10 },
+  internal.campus.analytics.rollupDailyAnalytics,
+  {}
+);
+
+/**
  * Check for expired trial subscriptions daily.
  * Transitions trialing subs where trialEndsAt < now to past_due.
  *

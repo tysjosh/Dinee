@@ -108,7 +108,12 @@ export const conversationTypeValidator = v.union(
   v.literal("runsheet_fuel_order_intake"),
   v.literal("runsheet_order_status"),
   v.literal("runsheet_driver_exception"),
-  v.literal("runsheet_dispatch_callback")
+  v.literal("runsheet_dispatch_callback"),
+  // Campus (student-created knowledge-grounded voice agent) conversation type.
+  // Additive union extension so a Campus_Agent call can store its conversation
+  // type on the `calls` record alongside `campusAgentId` (dinee-campus Req 8.1,
+  // 8.8, 9.1). Existing rows are unaffected — this only widens the accepted set.
+  v.literal("campus_agent_conversation")
 );
 
 // Proof of delivery
