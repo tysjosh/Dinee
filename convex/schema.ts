@@ -100,6 +100,10 @@ export default defineSchema({
     tenantId: v.optional(v.string()),
     lastLoginAt: v.optional(v.number()),
     createdAt: v.optional(v.number()),
+    // NEW — Campus Social Loops: declared age band for age-appropriateness
+    // filtering (campus-social-loops Req 7.7). Additive; existing rows without
+    // it are treated as "unknown".
+    ageBand: v.optional(v.union(v.literal("minor"), v.literal("adult"))),
   })
     // @convex-dev/auth required indexes
     .index("email", ["email"])
@@ -1792,4 +1796,283 @@ export default defineSchema({
     .index("by_clip_id", ["clipId"])
     .index("by_agent_id", ["agentId"])
     .index("by_call_id", ["callId"]),
+
+  // ==========================================================================
+  // Campus Social Loops (campus-social-loops)
+  // All tables below are NEW and purely additive. They mirror the naming and
+  // indexing conventions of the existing campus* tables. Battle_Ranking is
+  // intentionally NOT a table — it is derived by `rankBattleWins` from resolved
+  // campusBattles rows within the trailing 7-day window.
+  // ==========================================================================
+
+  // Agent_Battle — a head-to-head matchup of exactly two published agents.
+  campusBattles: defineTable({
+    battleId: v.string(),
+    campusTag: v.string(),                       // per-campus ranking scope (Req 1.8)
+    format: v.union(
+      v.literal("roast_battle"),
+      v.literal("debate"),
+      v.literal("trivia_showdown"),
+      v.literal("advice_showdown"),
+      v.literal("club_pitch_battle"),
+    ),
+    participants: v.array(v.object({             // exactly two (Req 1.1)
+      agentId: v.string(),
+      ownerId: v.string(),
+      responseCallId: v.optional(v.string()),    // Voice_Runtime response (Req 1.3)
+      responseClipId: v.optional(v.string()),
+    })),
+    status: v.union(
+      v.literal("generating"),
+      v.literal("open"),
+      v.literal("resolved"),
+      v.literal("aborted"),                       // Req 1.10
+      v.literal("start_failed"),                  // Req 1.11
+    ),
+    ageAppropriateFor: v.array(v.string()),      // age-band markers (Req 7.7)
+    openedAt: v.optional(v.number()),
+    votingClosesAt: v.optional(v.number()),      // openedAt + 24h (Req 1.12)
+    outcome: v.optional(v.union(                 // resolved result (Req 1.6)
+      v.object({ kind: v.literal("winner"), winnerAgentId: v.string() }),
+      v.object({ kind: v.literal("tie") }),
+    )),
+    resolvedAt: v.optional(v.number()),          // drives trailing-window ranking (Req 1.8)
+    createdAt: v.number(),
+  })
+    .index("by_battle_id", ["battleId"])
+    .index("by_campus_and_status", ["campusTag", "status"])
+    .index("by_campus_and_resolved", ["campusTag", "resolvedAt"]),
+
+  // Battle_Vote — at most one per voter per battle (Req 1.4, 1.5).
+  campusBattleVotes: defineTable({
+    battleId: v.string(),
+    voterKey: v.string(),                        // hashed voter identity
+    choiceAgentId: v.string(),                   // one of the two participants
+    updatedAt: v.number(),                       // most-recent selection wins (Req 1.4)
+  })
+    .index("by_battle_id", ["battleId"])
+    .index("by_battle_and_voter", ["battleId", "voterKey"]), // uniqueness pair
+
+  // Rivalry — head-to-head record between two agents (Req 1.7).
+  campusRivalries: defineTable({
+    pairKey: v.string(),                         // canonical sorted "agentA|agentB"
+    agentAId: v.string(),
+    agentBId: v.string(),
+    aWins: v.number(),
+    bWins: v.number(),
+    ties: v.number(),
+    battleCount: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_pair_key", ["pairKey"])
+    .index("by_agent_a", ["agentAId"])
+    .index("by_agent_b", ["agentBId"]),
+
+  // Daily_Challenge — exactly one per campus per local calendar day (Req 2.1).
+  campusChallenges: defineTable({
+    challengeId: v.string(),
+    campusTag: v.string(),
+    day: v.string(),                             // YYYY-MM-DD in the campus-local tz (Req 2.1)
+    prompt: v.string(),                          // 1..280 chars (Req 2.1)
+    submissionOpensAt: v.number(),
+    submissionClosesAt: v.number(),              // +24h (Req 2.1)
+    votingOpensAt: v.number(),
+    votingClosesAt: v.number(),                  // +24h (Req 2.1)
+    status: v.union(
+      v.literal("submitting"),
+      v.literal("voting"),
+      v.literal("closed"),
+    ),
+    ageAppropriateFor: v.array(v.string()),      // age-band markers (Req 7.7)
+    winningEntryId: v.optional(v.string()),      // recorded at close (Req 2.9)
+    createdAt: v.number(),
+  })
+    .index("by_challenge_id", ["challengeId"])
+    .index("by_campus_and_day", ["campusTag", "day"]), // one-per-day uniqueness
+
+  // Challenge_Entry — one per agent per challenge (Req 2.4).
+  campusChallengeEntries: defineTable({
+    entryId: v.string(),
+    challengeId: v.string(),
+    agentId: v.string(),
+    ownerId: v.string(),                         // submitting Student_Creator (Req 2.2)
+    responseCallId: v.optional(v.string()),      // grounded Voice_Runtime response
+    responseClipId: v.optional(v.string()),
+    submittedAt: v.number(),                     // tie-break key (Req 2.8, 2.9)
+    createdAt: v.number(),
+  })
+    .index("by_entry_id", ["entryId"])
+    .index("by_challenge_id", ["challengeId"])
+    .index("by_challenge_and_agent", ["challengeId", "agentId"]), // uniqueness pair
+
+  // Challenge_Vote — at most one per user per challenge (Req 2.6).
+  campusChallengeVotes: defineTable({
+    challengeId: v.string(),
+    voterKey: v.string(),
+    entryId: v.string(),
+    updatedAt: v.number(),                       // most-recent selection wins (Req 2.6)
+  })
+    .index("by_challenge_id", ["challengeId"])
+    .index("by_challenge_and_voter", ["challengeId", "voterKey"]), // uniqueness pair
+
+  // Share_Clip — a 10–20s captioned excerpt extending campusCallClips (Req 3.2).
+  campusShareClips: defineTable({
+    shareClipId: v.string(),
+    sourceCallId: v.string(),                    // recorded source call
+    sourceClipId: v.optional(v.string()),        // underlying campusCallClips row
+    agentId: v.string(),                         // attribution (Req 3.2, 8.2)
+    ownerId: v.string(),
+    durationSec: v.number(),                     // 10..20 (Req 3.2)
+    hasCaptions: v.boolean(),                    // always true (Req 3.2)
+    formats: v.array(v.union(
+      v.literal("tiktok"),
+      v.literal("reels"),
+      v.literal("snap"),
+    )),
+    label: v.string(),                           // always "AI voice agent" (Req 3.2, 8.2)
+    storageId: v.optional(v.string()),
+    status: v.union(                             // gating outcome (Req 3.5–3.10)
+      v.literal("suggested"),
+      v.literal("available"),
+      v.literal("withheld_consent"),
+      v.literal("withheld_policy"),
+      v.literal("withheld_screening_error"),
+      v.literal("discarded"),
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_share_clip_id", ["shareClipId"])
+    .index("by_source_call_id", ["sourceCallId"])
+    .index("by_agent_id", ["agentId"]),
+
+  // Group_Chat_Session — link-accessed context around one agent (Req 4.1).
+  campusGroupSessions: defineTable({
+    sessionId: v.string(),
+    agentId: v.string(),
+    ownerId: v.string(),
+    token: v.string(),                           // unique, high-entropy access token (Req 4.1)
+    status: v.union(v.literal("open"), v.literal("closed")), // Req 4.8
+    participantCount: v.number(),                // cap 100 (Req 4.2, 4.12)
+    createdAt: v.number(),
+  })
+    .index("by_session_id", ["sessionId"])
+    .index("by_token", ["token"])                // resolves only to its session (Req 4.1, 4.7)
+    .index("by_agent_id", ["agentId"]),
+
+  // Participant — a person admitted to a session (Req 4.2).
+  campusGroupParticipants: defineTable({
+    sessionId: v.string(),
+    participantKey: v.string(),                  // hashed participant identity
+    joinedAt: v.number(),
+  })
+    .index("by_session_id", ["sessionId"])
+    .index("by_session_and_participant", ["sessionId", "participantKey"]), // uniqueness pair
+
+  // Group_Question — a screened participant question (Req 4.5, 4.6, 4.11).
+  campusGroupQuestions: defineTable({
+    questionId: v.string(),
+    sessionId: v.string(),
+    participantKey: v.string(),
+    body: v.string(),                            // 1..500 chars (Req 4.2, 4.11)
+    status: v.union(                             // screening outcome (Req 4.6)
+      v.literal("accepted"),
+      v.literal("blocked"),
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_question_id", ["questionId"])
+    .index("by_session_id", ["sessionId"]),
+
+  // Group_Response — the agent's grounded reply (Req 4.3, 4.9).
+  campusGroupResponses: defineTable({
+    responseId: v.string(),
+    questionId: v.string(),
+    sessionId: v.string(),
+    agentId: v.string(),
+    kind: v.union(v.literal("voice_note"), v.literal("share_clip")),
+    durationSec: v.optional(v.number()),         // ≤ 60 for voice notes (Req 4.3)
+    storageId: v.optional(v.string()),
+    clipId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_response_id", ["responseId"])
+    .index("by_question_id", ["questionId"])
+    .index("by_session_id", ["sessionId"]),
+
+  // Streak — one Creator_Streak and one Caller_Streak per user (Req 5.1–5.4, 5.9).
+  campusStreaks: defineTable({
+    userId: v.string(),
+    kind: v.union(v.literal("creator"), v.literal("caller")),
+    count: v.number(),                           // non-negative integer (Req 5.7)
+    lastActiveDay: v.optional(v.string()),       // YYYY-MM-DD in reference tz (Req 5.1)
+    updatedAt: v.number(),
+  })
+    .index("by_user_and_kind", ["userId", "kind"]), // uniqueness pair
+
+  // Activity counters — cumulative counts backing badge thresholds (Req 5.5).
+  campusActivityCounters: defineTable({
+    userId: v.string(),
+    activityType: v.string(),                    // e.g. "calls_received", "quests_completed"
+    count: v.number(),                           // cumulative
+    updatedAt: v.number(),
+  })
+    .index("by_user_and_type", ["userId", "activityType"]), // uniqueness pair
+
+  // Badge — a durable achievement awarded exactly once (Req 5.5, 5.8).
+  campusBadges: defineTable({
+    userId: v.string(),
+    badgeKey: v.string(),                        // stable criterion key
+    category: v.union(v.literal("creator"), v.literal("caller")), // Req 5.6
+    awardedAt: v.number(),
+  })
+    .index("by_user_id", ["userId"])
+    .index("by_user_and_badge", ["userId", "badgeKey"]), // idempotent-award uniqueness
+
+  // Campus_Quest — a 1–10 step mission (Req 6.1).
+  campusQuests: defineTable({
+    questId: v.string(),
+    offeringAgentId: v.string(),                 // must be published to accept (Req 6.9)
+    campusTag: v.optional(v.string()),
+    title: v.string(),
+    steps: v.array(v.object({                    // 1..10 (Req 6.1)
+      stepId: v.string(),
+      order: v.number(),
+      description: v.string(),                   // 1..200 chars (Req 6.1)
+      refAgentId: v.optional(v.string()),        // referenced agent must be published (Req 6.8)
+    })),
+    ageAppropriateFor: v.array(v.string()),      // age-band markers (Req 7.7)
+    createdAt: v.number(),
+  })
+    .index("by_quest_id", ["questId"])
+    .index("by_offering_agent", ["offeringAgentId"]),
+
+  // Quest_Progress — a user's per-step completion state (Req 6.2, 6.3, 6.6).
+  campusQuestProgress: defineTable({
+    progressId: v.string(),
+    questId: v.string(),
+    userId: v.string(),
+    steps: v.array(v.object({                    // one per Quest_Step
+      stepId: v.string(),
+      complete: v.boolean(),                     // completed at most once (Req 6.6)
+      completedAt: v.optional(v.number()),
+    })),
+    completed: v.boolean(),                      // Req 6.4
+    completedAt: v.optional(v.number()),         // recorded once (Req 6.4)
+    createdAt: v.number(),
+  })
+    .index("by_progress_id", ["progressId"])
+    .index("by_quest_and_user", ["questId", "userId"]), // uniqueness pair
+
+  // Companion interaction tracking — session-gap + reminder/break state (Req 7.4, 7.5).
+  campusCompanionInteractions: defineTable({
+    userId: v.string(),
+    agentId: v.string(),                         // companion-style agent (ai_twin/funny_character)
+    sessionStartMs: v.optional(v.number()),
+    lastInteractionMs: v.optional(v.number()),
+    lastReminderMs: v.optional(v.number()),
+    cumulativeMs: v.number(),                    // gapless cumulative interaction
+    breaksShown: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_and_agent", ["userId", "agentId"]), // uniqueness pair
 });
